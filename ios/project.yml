@@ -1,0 +1,45 @@
+name: UnSound
+options:
+  bundleIdPrefix: com.unsound.private
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: 17.0
+    SWIFT_VERSION: 5.0
+targets:
+  UnSound:
+    type: application
+    platform: iOS
+    sources:
+      - path: UnSound
+    info:
+      path: UnSound/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: UnSound
+        CFBundleName: UnSound
+        CFBundleLocalizations:
+          - en
+          - de
+          - ru
+        CFBundleShortVersionString: "1.7.1"
+        CFBundleVersion: "39"
+        UILaunchStoryboardName: LaunchScreen
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - audio
+        NSMicrophoneUsageDescription: Reserved for a future private LAB recording module.
+        NSLocalNetworkUsageDescription: UnSound uses your local network or private VPN to pair with your Windows companion.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.unsound.private.player
+        PRODUCT_NAME: UnSound
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies: []
