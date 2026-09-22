@@ -1,4 +1,42 @@
 import Foundation
+import AVFoundation
+
+private struct EmbeddedAudioMetadata: Sendable {
+    var title: String?
+    var artist: String?
+    var artworkData: Data?
+
+    var isEmpty: Bool { title == nil && artist == nil && artworkData == nil }
+}
+
+private enum EmbeddedAudioMetadataReader {
+    static func read(from url: URL) async -> EmbeddedAudioMetadata? {
+        let asset = AVURLAsset(url: url)
+        guard let items = try? await asset.load(.commonMetadata) else { return nil }
+
+        var result = EmbeddedAudioMetadata()
+        for item in items {
+            switch item.commonKey {
+            case .commonKeyTitle where result.title == nil:
+                result.title = try? await item.load(.stringValue)
+            case .commonKeyArtist where result.artist == nil:
+                result.artist = try? await item.load(.stringValue)
+            case .commonKeyArtwork where result.artworkData == nil:
+                result.artworkData = try? await item.load(.dataValue)
+            default:
+                break
+            }
+        }
+
+        result.title = result.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        result.artist = result.artist?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        return result.isEmpty ? nil : result
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}
 
 private actor LibraryPersistenceWriter {
     private struct Snapshot: Codable {
@@ -62,15 +100,22 @@ final class LibraryStore: ObservableObject {
     private let persistenceWriter = LibraryPersistenceWriter()
     private var pendingSaveTask: Task<Void, Never>?
     private let hiddenSuggestionsKey = "unsound.hiddenSuggestionIDs"
+    private let embeddedMetadataProcessedKey = "unsound.embeddedMetadataProcessedTrackIDs.v1"
+    private var embeddedMetadataProcessedIDs: Set<String> = []
+    private var embeddedMetadataTasks: Set<UUID> = []
     private let supportedAudioExtensions: Set<String> = [
         "mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "mp4"
     ]
 
     init() {
+        embeddedMetadataProcessedIDs = Set(
+            UserDefaults.standard.stringArray(forKey: embeddedMetadataProcessedKey) ?? []
+        )
         load()
         loadHiddenSuggestions()
         prepareImportDropFolder()
         _ = scanImportDropFolder()
+        scheduleExistingEmbeddedMetadataReads()
     }
 
     var likedTracks: [Track] { tracks.filter(\.isLiked) }
@@ -180,6 +225,7 @@ final class LibraryStore: ObservableObject {
             tracks[existingIndex].providerURL = providerURL
             let updated = tracks[existingIndex]
             save()
+            scheduleEmbeddedMetadataRead(for: updated.id, fileURL: destination, updateText: false, force: true)
             return updated
         }
 
@@ -194,6 +240,7 @@ final class LibraryStore: ObservableObject {
         )
         tracks.insert(track, at: 0)
         save()
+        scheduleEmbeddedMetadataRead(for: track.id, fileURL: destination, updateText: false, force: true)
         return track
     }
 
@@ -236,6 +283,7 @@ final class LibraryStore: ObservableObject {
             tracks[existingIndex].providerURL = providerURL ?? tracks[existingIndex].providerURL
             let updated = tracks[existingIndex]
             save()
+            scheduleEmbeddedMetadataRead(for: updated.id, fileURL: destination, updateText: false, force: true)
             return updated
         }
 
@@ -251,6 +299,7 @@ final class LibraryStore: ObservableObject {
         )
         tracks.insert(track, at: 0)
         save()
+        scheduleEmbeddedMetadataRead(for: track.id, fileURL: destination, updateText: false, force: true)
         return track
     }
 
@@ -623,7 +672,66 @@ final class LibraryStore: ObservableObject {
             localFilename: storedName
         )
         tracks.insert(track, at: 0)
+        scheduleEmbeddedMetadataRead(for: track.id, fileURL: destination, updateText: true, force: true)
         return track
+    }
+
+    private func scheduleExistingEmbeddedMetadataReads() {
+        for track in tracks where track.customArtworkFilename == nil {
+            guard let url = localURL(for: track) else { continue }
+            scheduleEmbeddedMetadataRead(
+                for: track.id,
+                fileURL: url,
+                updateText: track.artist == "Unknown Artist"
+            )
+        }
+    }
+
+    private func scheduleEmbeddedMetadataRead(
+        for trackID: UUID,
+        fileURL: URL,
+        updateText: Bool,
+        force: Bool = false
+    ) {
+        let key = trackID.uuidString
+        guard !embeddedMetadataTasks.contains(trackID) else { return }
+        guard force || !embeddedMetadataProcessedIDs.contains(key) else { return }
+        embeddedMetadataTasks.insert(trackID)
+
+        Task { [weak self] in
+            let metadata = await EmbeddedAudioMetadataReader.read(from: fileURL)
+            guard let self else { return }
+            self.embeddedMetadataTasks.remove(trackID)
+            self.embeddedMetadataProcessedIDs.insert(key)
+            UserDefaults.standard.set(
+                self.embeddedMetadataProcessedIDs.sorted(),
+                forKey: self.embeddedMetadataProcessedKey
+            )
+
+            guard let index = self.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+            var textChanged = false
+
+            if updateText, let title = metadata?.title, self.tracks[index].title != title {
+                self.tracks[index].title = title
+                textChanged = true
+            }
+            if updateText, let artist = metadata?.artist, self.tracks[index].artist != artist {
+                self.tracks[index].artist = artist
+                textChanged = true
+            }
+
+            if self.tracks[index].customArtworkFilename == nil,
+               let artworkData = metadata?.artworkData {
+                do {
+                    try self.applyCustomArtwork(artworkData, to: [trackID])
+                    return
+                } catch {
+                    print("Embedded artwork import failed:", error)
+                }
+            }
+
+            if textChanged { self.save() }
+        }
     }
 
     private func stageDuplicate(
