@@ -1,27 +1,14 @@
 import SwiftUI
 import UIKit
 
-enum MiniPlayerVisualMode: String, CaseIterable, Identifiable {
-    case artwork = "ARTWORK"
-    case waveform = "WAVEFORM"
-    case both = "BOTH"
-
-    var id: String { rawValue }
-}
-
 struct BottomPlayer: View {
     @ObservedObject var player: PlayerCoordinator
     @ObservedObject var audio: AudioEngine
     @ObservedObject var library: LibraryStore
     @ObservedObject var sync: SyncCoordinator
 
-    @AppStorage("miniPlayerVisualMode") private var visualModeRaw = MiniPlayerVisualMode.both.rawValue
     @State private var isScrubbing = false
     @State private var scrubTime: Double = 0
-
-    private var visualMode: MiniPlayerVisualMode {
-        MiniPlayerVisualMode(rawValue: visualModeRaw) ?? .both
-    }
 
     private var displayedTime: Double {
         isScrubbing ? scrubTime : min(audio.currentTime, max(audio.duration, 0))
@@ -35,7 +22,7 @@ struct BottomPlayer: View {
                         player.showFullPlayer = true
                     } label: {
                         HStack(spacing: 12) {
-                            miniVisual(track, size: 54)
+                            artwork(track, size: 54)
 
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(track.title)
@@ -127,38 +114,6 @@ struct BottomPlayer: View {
             .background(Color.black.opacity(0.80))
             .overlay(alignment: .top) {
                 Rectangle().fill(Color.white.opacity(0.05)).frame(height: 0.5)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func miniVisual(_ track: Track, size: CGFloat) -> some View {
-        switch visualMode {
-        case .artwork:
-            artwork(track, size: size)
-        case .waveform:
-            ZStack {
-                RoundedRectangle(cornerRadius: size * 0.23, style: .continuous)
-                    .fill(Color.black)
-                ReactiveSpectrumIcon(
-                    spectrum: audio.visualSpectrum,
-                    size: size * 0.78,
-                    reducedVisuals: audio.performanceLimited
-                )
-            }
-            .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: size * 0.23, style: .continuous))
-        case .both:
-            ZStack {
-                artwork(track, size: size)
-                Color.black.opacity(0.22)
-                    .frame(width: size, height: size)
-                    .clipShape(RoundedRectangle(cornerRadius: size * 0.23, style: .continuous))
-                ReactiveSpectrumIcon(
-                    spectrum: audio.visualSpectrum,
-                    size: size * 0.58,
-                    reducedVisuals: audio.performanceLimited
-                )
             }
         }
     }

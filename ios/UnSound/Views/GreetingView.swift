@@ -67,7 +67,7 @@ struct GreetingView: View {
                             .foregroundStyle(.white)
                             .opacity(creditOpacity)
 
-                        Text("TAP TO OPEN")
+                        Text("UNSOUND")
                             .font(.system(size: 9, weight: .bold, design: .rounded))
                             .tracking(3.0)
                             .foregroundStyle(.white.opacity(0.30))
@@ -118,6 +118,9 @@ struct GreetingView: View {
             portalProgress = 0
             withAnimation(.easeOut(duration: 0.34)) { creditOpacity = 1 }
             withAnimation(.easeOut(duration: 0.44).delay(0.12)) { hintOpacity = 1 }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.62) {
+                enter()
+            }
         }
         .onTapGesture { enter() }
         .sensoryFeedback(.impact(weight: .medium), trigger: isEntering)

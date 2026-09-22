@@ -35,9 +35,26 @@ enum SpectrumColorMode: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     @ObservedObject var library: LibraryStore
     @ObservedObject var audio: AudioEngine
+    let pcSyncConnected: Bool
+    let sharedSyncConnected: Bool
+    let downloadsConnected: Bool
+    let openPCSync: () -> Void
+    let openSharedSync: () -> Void
+    let openDownloads: () -> Void
 
     var body: some View {
-        SettingsContent(library: library, audio: audio, topPadding: 28, pageTitle: "SETTINGS")
+        SettingsContent(
+            library: library,
+            audio: audio,
+            topPadding: 28,
+            pageTitle: "SETTINGS",
+            pcSyncConnected: pcSyncConnected,
+            sharedSyncConnected: sharedSyncConnected,
+            downloadsConnected: downloadsConnected,
+            openPCSync: openPCSync,
+            openSharedSync: openSharedSync,
+            openDownloads: openDownloads
+        )
     }
 }
 
@@ -67,6 +84,12 @@ private struct SettingsContent: View {
     @ObservedObject var audio: AudioEngine
     let topPadding: CGFloat
     let pageTitle: String
+    var pcSyncConnected = false
+    var sharedSyncConnected = false
+    var downloadsConnected = false
+    var openPCSync: (() -> Void)? = nil
+    var openSharedSync: (() -> Void)? = nil
+    var openDownloads: (() -> Void)? = nil
 
     @AppStorage("iconSpectrumColorMode") private var iconModeRaw = SpectrumColorMode.white.rawValue
     @AppStorage("iconSpectrumCustomColorHex") private var iconCustomHex = "#FFFFFF"
@@ -90,6 +113,9 @@ private struct SettingsContent: View {
 
     private enum SectionKind: String {
         case language
+        case downloads
+        case sharedSync
+        case pcSync
         case orb
         case knob
         case bass
@@ -119,6 +145,54 @@ private struct SettingsContent: View {
                     .padding(.bottom, 4)
 
                     languageCard
+
+                    if openDownloads != nil {
+                        sectionCard(
+                            .downloads,
+                            title: "DOWNLOAD SONGS",
+                            subtitle: downloadsConnected ? "Cloud connected" : "Cloud not configured",
+                            icon: "icloud.and.arrow.down.fill"
+                        ) {
+                            connectionContent(
+                                description: "Upload imported MP3s automatically and download all files or selected songs.",
+                                buttonTitle: "OPEN DOWNLOAD SONGS",
+                                connected: downloadsConnected,
+                                action: openDownloads
+                            )
+                        }
+                    }
+
+                    if openSharedSync != nil {
+                        sectionCard(
+                            .sharedSync,
+                            title: "SHARED SYNC",
+                            subtitle: sharedSyncConnected ? "Connected" : "Connect two iPhones",
+                            icon: "person.2.fill"
+                        ) {
+                            connectionContent(
+                                description: "Pair with a short code, see the other song and position, or start a Listening Party.",
+                                buttonTitle: "OPEN SHARED SYNC",
+                                connected: sharedSyncConnected,
+                                action: openSharedSync
+                            )
+                        }
+                    }
+
+                    if openPCSync != nil {
+                        sectionCard(
+                            .pcSync,
+                            title: "PC SYNC",
+                            subtitle: pcSyncConnected ? "Connected" : "Windows companion not connected",
+                            icon: "desktopcomputer"
+                        ) {
+                            connectionContent(
+                                description: "Connect the Windows companion and keep playback and sound controls together.",
+                                buttonTitle: "OPEN PC SYNC",
+                                connected: pcSyncConnected,
+                                action: openPCSync
+                            )
+                        }
+                    }
 
                     sectionCard(.bass, title: "BASS OUTPUT", subtitle: audio.outputMode.rawValue, icon: "speaker.wave.3.fill") {
                         bassOutputContent
@@ -223,6 +297,44 @@ private struct SettingsContent: View {
         }
         .padding(16)
         .usGlass(RoundedRectangle(cornerRadius: 24, style: .continuous), tint: Color.white.opacity(0.012))
+    }
+
+    private func connectionContent(
+        description: String,
+        buttonTitle: String,
+        connected: Bool,
+        action: (() -> Void)?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(connected ? Color.green : USTheme.accent)
+                    .frame(width: 8, height: 8)
+                Text(AppLocalization.text(connected ? "READY" : "SETUP REQUIRED"))
+                    .font(.caption2.bold())
+                    .foregroundStyle(connected ? Color.green : USTheme.accent)
+            }
+
+            Text(AppLocalization.text(description))
+                .font(.caption)
+                .foregroundStyle(USTheme.secondary)
+
+            Button {
+                action?()
+            } label: {
+                HStack {
+                    Text(AppLocalization.text(buttonTitle))
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                }
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(USTheme.accent, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            }
+            .buttonStyle(USPressStyle())
+        }
     }
 
     @ViewBuilder

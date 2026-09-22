@@ -159,74 +159,15 @@ struct RootView: View {
     }
 
     private var settingsPage: some View {
-        ZStack(alignment: .topTrailing) {
-            SettingsView(library: library, audio: audio)
-
-            VStack(alignment: .trailing, spacing: 9) {
-                Button {
-                    showDeviceSync = true
-                } label: {
-                    HStack(spacing: 7) {
-                        Circle()
-                            .fill(sync.isPaired ? Color.green : USTheme.accent)
-                            .frame(width: 7, height: 7)
-                        Image(systemName: "desktopcomputer")
-                        Text("PC LINK")
-                            .font(.system(size: 10, weight: .black, design: .rounded))
-                            .tracking(0.7)
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .usGlass(Capsule(), interactive: true, tint: sync.isPaired ? Color.green.opacity(0.10) : USTheme.accent.opacity(0.09))
-                }
-                .buttonStyle(USPressStyle())
-                .accessibilityLabel(sync.isPaired ? "Windows companion connected" : "Pair Windows companion")
-
-                Button {
-                    showCloudSync = true
-                } label: {
-                    HStack(spacing: 7) {
-                        Circle()
-                            .fill(cloudConfigured ? Color.green : USTheme.accent)
-                            .frame(width: 7, height: 7)
-                        Image(systemName: "person.2.fill")
-                        Text("SHARED SYNC")
-                            .font(.system(size: 10, weight: .black, design: .rounded))
-                            .tracking(0.7)
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .usGlass(Capsule(), interactive: true, tint: cloudConfigured ? Color.green.opacity(0.10) : USTheme.accent.opacity(0.09))
-                }
-                .buttonStyle(USPressStyle())
-
-                Button {
-                    showUnSoundCloud = true
-                } label: {
-                    HStack(spacing: 7) {
-                        Circle()
-                            .fill(cloudLibrary.isConfigured ? Color.green : USTheme.accent)
-                            .frame(width: 7, height: 7)
-                        Image(systemName: "icloud.fill")
-                        Text(AppLocalization.text("DOWNLOAD SONGS"))
-                            .font(.system(size: 10, weight: .black, design: .rounded))
-                            .tracking(0.7)
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .usGlass(
-                        Capsule(),
-                        interactive: true,
-                        tint: cloudLibrary.isConfigured ? Color.green.opacity(0.10) : USTheme.accent.opacity(0.09)
-                    )
-                }
-                .buttonStyle(USPressStyle())
-            }
-            .padding(.top, 84)
-            .padding(.trailing, 18)
-        }
+        SettingsView(
+            library: library,
+            audio: audio,
+            pcSyncConnected: sync.isPaired,
+            sharedSyncConnected: cloudConfigured,
+            downloadsConnected: cloudLibrary.isConfigured,
+            openPCSync: { showDeviceSync = true },
+            openSharedSync: { showCloudSync = true },
+            openDownloads: { showUnSoundCloud = true }
+        )
     }
 }

@@ -10,6 +10,11 @@ struct FullPlayerView: View {
     @State private var manualDB = ""
     @State private var isScrubbing = false
     @State private var scrubTime: Double = 0
+    @AppStorage("fullPlayerVisualMode") private var visualModeRaw = FullPlayerVisualMode.both.rawValue
+
+    private var visualMode: FullPlayerVisualMode {
+        FullPlayerVisualMode(rawValue: visualModeRaw) ?? .both
+    }
 
     private var activeLyricIndex: Int? {
         player.lyrics.lastIndex(where: { $0.time <= audio.currentTime })
@@ -28,6 +33,7 @@ struct FullPlayerView: View {
                     header
 
                     if let track = audio.currentTrack {
+                        visualModePicker
                         artwork(track)
                         metadata(track)
                         progress
@@ -98,8 +104,25 @@ struct FullPlayerView: View {
     }
 
     private func artwork(_ track: Track) -> some View {
-        TrackHeroArtwork(track: track, audio: audio, library: library, cornerRadius: 30)
+        TrackHeroArtwork(
+            track: track,
+            audio: audio,
+            library: library,
+            cornerRadius: 30,
+            visualMode: visualMode,
+            spectrumSize: 174
+        )
             .onTapGesture(count: 2) { library.like(track.id) }
+    }
+
+    private var visualModePicker: some View {
+        Picker(AppLocalization.text("PLAYER VIEW"), selection: $visualModeRaw) {
+            ForEach(FullPlayerVisualMode.allCases) { mode in
+                Text(AppLocalization.text(mode.rawValue)).tag(mode.rawValue)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel(AppLocalization.text("PLAYER VIEW"))
     }
 
     private func metadata(_ track: Track) -> some View {

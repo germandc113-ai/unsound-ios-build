@@ -7,6 +7,11 @@ struct ArtworkPlayerView: View {
     @ObservedObject var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
     @State private var showPlaylistPicker = false
+    @AppStorage("fullPlayerVisualMode") private var visualModeRaw = FullPlayerVisualMode.both.rawValue
+
+    private var visualMode: FullPlayerVisualMode {
+        FullPlayerVisualMode(rawValue: visualModeRaw) ?? .both
+    }
 
     var body: some View {
         ZStack {
@@ -17,6 +22,7 @@ struct ArtworkPlayerView: View {
                     header
 
                     if let track = audio.currentTrack {
+                        visualModePicker
                         cover(track)
 
                         VStack(spacing: 5) {
@@ -86,52 +92,25 @@ struct ArtworkPlayerView: View {
 
     @ViewBuilder
     private func cover(_ track: Track) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [USTheme.accentDeep.opacity(0.72), Color.black],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-
-            if let localURL = library.customArtworkURL(for: track),
-               let image = UIImage(contentsOfFile: localURL.path) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else if let artworkURL = track.artworkURL,
-                      let url = URL(string: artworkURL) {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    placeholderCover
-                }
-            } else {
-                placeholderCover
-            }
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous).stroke(Color.white.opacity(0.075)))
-        .shadow(
-            color: audio.performanceLimited ? .clear : .black.opacity(0.55),
-            radius: audio.performanceLimited ? 0 : 30,
-            y: audio.performanceLimited ? 0 : 16
+        TrackHeroArtwork(
+            track: track,
+            audio: audio,
+            library: library,
+            cornerRadius: 30,
+            visualMode: visualMode,
+            spectrumSize: 174
         )
         .onTapGesture(count: 2) { library.like(track.id) }
     }
 
-    private var placeholderCover: some View {
-        ZStack {
-            Color.black
-            ReactiveSpectrumIcon(
-                spectrum: audio.visualSpectrum,
-                size: 104,
-                reducedVisuals: audio.performanceLimited
-            )
+    private var visualModePicker: some View {
+        Picker(AppLocalization.text("PLAYER VIEW"), selection: $visualModeRaw) {
+            ForEach(FullPlayerVisualMode.allCases) { mode in
+                Text(AppLocalization.text(mode.rawValue)).tag(mode.rawValue)
+            }
         }
+        .pickerStyle(.segmented)
+        .accessibilityLabel(AppLocalization.text("PLAYER VIEW"))
     }
 
     private var progress: some View {

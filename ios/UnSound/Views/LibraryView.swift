@@ -1,6 +1,8 @@
 import SwiftUI
 import UIKit
 
+private let allSongsPlaylistID = UUID(uuidString: "A1150000-0000-4000-8000-000000000001")!
+
 struct LibraryView: View {
     @ObservedObject var library: LibraryStore
     @ObservedObject var player: PlayerCoordinator
@@ -11,6 +13,10 @@ struct LibraryView: View {
 
     private var ordered: [Playlist] {
         library.playlists.sorted { ($0.isPinned ? 0 : 1, $0.title) < ($1.isPinned ? 0 : 1, $1.title) }
+    }
+
+    private var allPlayableTracks: [Track] {
+        library.tracks.filter { library.localURL(for: $0) != nil }
     }
 
     var body: some View {
@@ -61,6 +67,23 @@ struct LibraryView: View {
                                 }
                             }
                         }
+
+                        Button {
+                            selectedPlaylist = Playlist(
+                                id: allSongsPlaylistID,
+                                title: "All Songs",
+                                trackIDs: allPlayableTracks.map(\.id),
+                                isPinned: false
+                            )
+                        } label: {
+                            libraryCard(
+                                title: AppLocalization.text("All Songs"),
+                                subtitle: "\(allPlayableTracks.count) \(AppLocalization.text("songs"))",
+                                icon: "music.note.house.fill",
+                                pinned: false
+                            )
+                        }
+                        .buttonStyle(USPressStyle())
 
                         Button { showReplay = true } label: {
                             ReplayCard(library: library)
@@ -152,8 +175,11 @@ struct PlaylistDetailView: View {
 
     private let recommendationBottomID = "playlist-recommendations-bottom"
 
+    private var isAllSongs: Bool { playlist.id == allSongsPlaylistID }
+
     private var tracks: [Track] {
         if playlist.title == "Liked Songs" { return library.likedTracks }
+        if isAllSongs { return library.tracks.filter { library.localURL(for: $0) != nil } }
         if let fresh = library.playlists.first(where: { $0.id == playlist.id }) {
             return library.tracks(in: fresh)
         }
@@ -191,20 +217,22 @@ struct PlaylistDetailView: View {
                         VStack(alignment: .leading, spacing: 14) {
                             HStack(alignment: .firstTextBaseline) {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(playlist.title).font(.largeTitle.bold())
-                                    Text("\(tracks.count) songs").foregroundStyle(USTheme.secondary)
+                                    Text(AppLocalization.text(playlist.title)).font(.largeTitle.bold())
+                                    Text("\(tracks.count) \(AppLocalization.text("songs"))").foregroundStyle(USTheme.secondary)
                                 }
                                 Spacer()
-                                Button {
-                                    withAnimation(.snappy(duration: 0.20)) { reorderMode.toggle() }
-                                } label: {
-                                    Label(reorderMode ? "Done" : "Reorder", systemImage: "arrow.up.arrow.down")
-                                        .font(.caption.bold())
-                                        .padding(.horizontal, 11)
-                                        .padding(.vertical, 8)
-                                        .usGlass(Capsule(), interactive: true, tint: reorderMode ? USTheme.accent.opacity(0.12) : nil)
+                                if !isAllSongs {
+                                    Button {
+                                        withAnimation(.snappy(duration: 0.20)) { reorderMode.toggle() }
+                                    } label: {
+                                        Label(reorderMode ? "Done" : "Reorder", systemImage: "arrow.up.arrow.down")
+                                            .font(.caption.bold())
+                                            .padding(.horizontal, 11)
+                                            .padding(.vertical, 8)
+                                            .usGlass(Capsule(), interactive: true, tint: reorderMode ? USTheme.accent.opacity(0.12) : nil)
+                                    }
+                                    .buttonStyle(USPressStyle())
                                 }
-                                .buttonStyle(USPressStyle())
                             }
 
                             searchField
@@ -220,52 +248,54 @@ struct PlaylistDetailView: View {
                                 playlistTrackRow(track)
                             }
 
-                            Divider().overlay(Color.white.opacity(0.06)).padding(.vertical, 12)
-                            Text("Recommended for this playlist").font(.title3.bold())
-                            Text("▶ previews. + adds. − hides a song from future suggestions.")
-                                .font(.caption)
-                                .foregroundStyle(USTheme.secondary)
-
-                            ForEach(recommendations) { track in
-                                HStack(spacing: 8) {
-                                    PlaylistArtworkThumb(track: track, library: library, size: 46)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(track.title).font(.subheadline.bold()).lineLimit(1)
-                                        Text(track.artist).font(.caption).foregroundStyle(USTheme.secondary).lineLimit(1)
-                                    }
-                                    Spacer()
-
-                                    Button { player.preview(track, seconds: 12) } label: {
-                                        Image(systemName: player.previewingTrackID == track.id ? "stop.circle.fill" : "play.circle.fill")
-                                            .font(.title2)
-                                            .foregroundStyle(player.previewingTrackID == track.id ? .white : USTheme.accent)
-                                    }
-                                    .buttonStyle(USPressStyle())
-
-                                    Button {
-                                        keepBottomAfterAdd = true
-                                        if playlist.title == "Liked Songs" { library.like(track.id) }
-                                        else { library.setTrack(track.id, inPlaylist: playlist.id, included: true) }
-                                    } label: {
-                                        Image(systemName: "plus.circle.fill").font(.title2).foregroundStyle(USTheme.accent)
-                                    }
-                                    .buttonStyle(USPressStyle())
-
-                                    Button {
-                                        withAnimation(.snappy(duration: 0.20)) { library.hideSuggestion(track.id) }
-                                    } label: {
-                                        Image(systemName: "minus.circle").font(.title2).foregroundStyle(.white.opacity(0.50))
-                                    }
-                                    .buttonStyle(USPressStyle())
-                                }
-                                .padding(.vertical, 3)
-                            }
-
-                            if recommendations.isEmpty {
-                                Text("No more suggestions here right now.")
+                            if !isAllSongs {
+                                Divider().overlay(Color.white.opacity(0.06)).padding(.vertical, 12)
+                                Text("Recommended for this playlist").font(.title3.bold())
+                                Text("▶ previews. + adds. − hides a song from future suggestions.")
                                     .font(.caption)
-                                    .foregroundStyle(USTheme.tertiary)
-                                    .padding(.vertical, 6)
+                                    .foregroundStyle(USTheme.secondary)
+
+                                ForEach(recommendations) { track in
+                                    HStack(spacing: 8) {
+                                        PlaylistArtworkThumb(track: track, library: library, size: 46)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(track.title).font(.subheadline.bold()).lineLimit(1)
+                                            Text(track.artist).font(.caption).foregroundStyle(USTheme.secondary).lineLimit(1)
+                                        }
+                                        Spacer()
+
+                                        Button { player.preview(track, seconds: 12) } label: {
+                                            Image(systemName: player.previewingTrackID == track.id ? "stop.circle.fill" : "play.circle.fill")
+                                                .font(.title2)
+                                                .foregroundStyle(player.previewingTrackID == track.id ? .white : USTheme.accent)
+                                        }
+                                        .buttonStyle(USPressStyle())
+
+                                        Button {
+                                            keepBottomAfterAdd = true
+                                            if playlist.title == "Liked Songs" { library.like(track.id) }
+                                            else { library.setTrack(track.id, inPlaylist: playlist.id, included: true) }
+                                        } label: {
+                                            Image(systemName: "plus.circle.fill").font(.title2).foregroundStyle(USTheme.accent)
+                                        }
+                                        .buttonStyle(USPressStyle())
+
+                                        Button {
+                                            withAnimation(.snappy(duration: 0.20)) { library.hideSuggestion(track.id) }
+                                        } label: {
+                                            Image(systemName: "minus.circle").font(.title2).foregroundStyle(.white.opacity(0.50))
+                                        }
+                                        .buttonStyle(USPressStyle())
+                                    }
+                                    .padding(.vertical, 3)
+                                }
+
+                                if recommendations.isEmpty {
+                                    Text("No more suggestions here right now.")
+                                        .font(.caption)
+                                        .foregroundStyle(USTheme.tertiary)
+                                        .padding(.vertical, 6)
+                                }
                             }
 
                             BrandFooter().padding(.top, 10)
@@ -334,7 +364,12 @@ struct PlaylistDetailView: View {
             }
             .buttonStyle(USPressStyle())
 
-            if reorderMode {
+            if isAllSongs {
+                Image(systemName: "play.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(USTheme.accent)
+                    .frame(width: 38, height: 38)
+            } else if reorderMode {
                 VStack(spacing: 1) {
                     Button { moveTrack(track.id, direction: -1) } label: {
                         Image(systemName: "chevron.up").frame(width: 28, height: 24)

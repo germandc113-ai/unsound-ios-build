@@ -62,7 +62,25 @@ enum AppLocalization {
             "Connected": "Verbunden",
             "Connection failed": "Verbindung fehlgeschlagen",
             "Listening Party live": "Listening Party läuft",
-            "Listening Party ended": "Listening Party beendet"
+            "Listening Party ended": "Listening Party beendet",
+            "All Songs": "Alle Songs",
+            "songs": "Songs",
+            "PLAYER VIEW": "PLAYER-ANSICHT",
+            "ARTWORK": "COVER",
+            "WAVEFORM": "WELLENFORM",
+            "BOTH": "BEIDES",
+            "PC SYNC": "PC-SYNC",
+            "SHARED SYNC": "SHARED SYNC",
+            "Connect two iPhones": "Zwei iPhones verbinden",
+            "Windows companion not connected": "Windows-Begleiter nicht verbunden",
+            "READY": "BEREIT",
+            "SETUP REQUIRED": "EINRICHTUNG NÖTIG",
+            "OPEN DOWNLOAD SONGS": "SONG-DOWNLOADS ÖFFNEN",
+            "OPEN SHARED SYNC": "SHARED SYNC ÖFFNEN",
+            "OPEN PC SYNC": "PC-SYNC ÖFFNEN",
+            "Upload imported MP3s automatically and download all files or selected songs.": "Importierte MP3s automatisch hochladen und alle oder ausgewählte Songs herunterladen.",
+            "Pair with a short code, see the other song and position, or start a Listening Party.": "Mit einem kurzen Code verbinden, Song und Position der anderen Person sehen oder eine Listening Party starten.",
+            "Connect the Windows companion and keep playback and sound controls together.": "Den Windows-Begleiter verbinden und Wiedergabe sowie Sound-Steuerung synchron halten."
         ],
         .russian: [
             "DOWNLOAD SONGS": "СКАЧАТЬ ТРЕКИ",
@@ -98,7 +116,25 @@ enum AppLocalization {
             "Connected": "Подключено",
             "Connection failed": "Ошибка подключения",
             "Listening Party live": "Listening Party запущена",
-            "Listening Party ended": "Listening Party завершена"
+            "Listening Party ended": "Listening Party завершена",
+            "All Songs": "Все треки",
+            "songs": "треков",
+            "PLAYER VIEW": "ВИД ПЛЕЕРА",
+            "ARTWORK": "ОБЛОЖКА",
+            "WAVEFORM": "ВОЛНА",
+            "BOTH": "ВМЕСТЕ",
+            "PC SYNC": "СИНХРОНИЗАЦИЯ С ПК",
+            "SHARED SYNC": "ОБЩАЯ СИНХРОНИЗАЦИЯ",
+            "Connect two iPhones": "Подключить два iPhone",
+            "Windows companion not connected": "Приложение Windows не подключено",
+            "READY": "ГОТОВО",
+            "SETUP REQUIRED": "НУЖНА НАСТРОЙКА",
+            "OPEN DOWNLOAD SONGS": "ОТКРЫТЬ ЗАГРУЗКИ",
+            "OPEN SHARED SYNC": "ОТКРЫТЬ ОБЩУЮ СИНХРОНИЗАЦИЮ",
+            "OPEN PC SYNC": "ОТКРЫТЬ СИНХРОНИЗАЦИЮ С ПК",
+            "Upload imported MP3s automatically and download all files or selected songs.": "Автоматически загружайте импортированные MP3 и скачивайте все или выбранные треки.",
+            "Pair with a short code, see the other song and position, or start a Listening Party.": "Подключитесь коротким кодом, смотрите трек и позицию другого человека или запустите Listening Party.",
+            "Connect the Windows companion and keep playback and sound controls together.": "Подключите приложение Windows и синхронизируйте воспроизведение и управление звуком."
         ]
     ]
 

@@ -20,8 +20,8 @@ targets:
           - en
           - de
           - ru
-        CFBundleShortVersionString: "1.7.1"
-        CFBundleVersion: "39"
+        CFBundleShortVersionString: "1.7.2"
+        CFBundleVersion: "40"
         UILaunchStoryboardName: LaunchScreen
         UIRequiresFullScreen: true
         UISupportedInterfaceOrientations:
