@@ -80,17 +80,7 @@ enum AppLocalization {
             "OPEN PC SYNC": "PC-SYNC ÖFFNEN",
             "Upload imported MP3s automatically and download all files or selected songs.": "Importierte MP3s automatisch hochladen und alle oder ausgewählte Songs herunterladen.",
             "Pair with a short code, see the other song and position, or start a Listening Party.": "Mit einem kurzen Code verbinden, Song und Position der anderen Person sehen oder eine Listening Party starten.",
-            "Connect the Windows companion and keep playback and sound controls together.": "Den Windows-Begleiter verbinden und Wiedergabe sowie Sound-Steuerung synchron halten.",
-            "PERFORMANCE": "PERFORMANCE",
-            "Smooth visuals active": "Flüssiger Modus aktiv",
-            "Full visual quality": "Volle visuelle Qualität",
-            "Automatic": "Automatisch",
-            "Smooth": "Flüssig",
-            "Quality": "Qualität",
-            "Automatic detects frame drops and temporarily simplifies waveform effects. Audio quality never changes.": "Automatisch erkennt Bildaussetzer und vereinfacht Waveform-Effekte vorübergehend. Die Audioqualität ändert sich nie.",
-            "Reduces live visuals only when frame drops are detected": "Reduziert Live-Effekte nur bei erkannten Bildaussetzern",
-            "Prioritizes fast swiping and low UI load": "Priorisiert schnelles Swipen und geringe UI-Last",
-            "Keeps maximum waveform detail": "Behält maximale Waveform-Details"
+            "Connect the Windows companion and keep playback and sound controls together.": "Den Windows-Begleiter verbinden und Wiedergabe sowie Sound-Steuerung synchron halten."
         ],
         .russian: [
             "DOWNLOAD SONGS": "СКАЧАТЬ ТРЕКИ",
@@ -144,17 +134,7 @@ enum AppLocalization {
             "OPEN PC SYNC": "ОТКРЫТЬ СИНХРОНИЗАЦИЮ С ПК",
             "Upload imported MP3s automatically and download all files or selected songs.": "Автоматически загружайте импортированные MP3 и скачивайте все или выбранные треки.",
             "Pair with a short code, see the other song and position, or start a Listening Party.": "Подключитесь коротким кодом, смотрите трек и позицию другого человека или запустите Listening Party.",
-            "Connect the Windows companion and keep playback and sound controls together.": "Подключите приложение Windows и синхронизируйте воспроизведение и управление звуком.",
-            "PERFORMANCE": "ПРОИЗВОДИТЕЛЬНОСТЬ",
-            "Smooth visuals active": "Плавный режим активен",
-            "Full visual quality": "Полное качество визуализации",
-            "Automatic": "Автоматически",
-            "Smooth": "Плавно",
-            "Quality": "Качество",
-            "Automatic detects frame drops and temporarily simplifies waveform effects. Audio quality never changes.": "Автоматический режим обнаруживает падение кадров и временно упрощает эффекты волны. Качество звука не меняется.",
-            "Reduces live visuals only when frame drops are detected": "Уменьшает эффекты только при падении кадров",
-            "Prioritizes fast swiping and low UI load": "Приоритет плавной прокрутки и низкой нагрузки",
-            "Keeps maximum waveform detail": "Максимальная детализация волны"
+            "Connect the Windows companion and keep playback and sound controls together.": "Подключите приложение Windows и синхронизируйте воспроизведение и управление звуком."
         ]
     ]
 

@@ -10,6 +10,12 @@ struct NowPlayingView: View {
     @State private var newPresetName = ""
     @State private var showSettings = false
     @State private var showArtworkPlayer = false
+    @State private var isScrubbing = false
+    @State private var scrubTime: Double = 0
+
+    private var displayedTime: Double {
+        isScrubbing ? scrubTime : min(audio.currentTime, max(audio.duration, 0))
+    }
 
     var body: some View {
         ZStack {
@@ -138,17 +144,27 @@ struct NowPlayingView: View {
         VStack(spacing: 7) {
             Slider(
                 value: Binding(
-                    get: { min(audio.currentTime, max(audio.duration, 0)) },
-                    set: { audio.seek(to: $0) }
+                    get: { displayedTime },
+                    set: { scrubTime = $0 }
                 ),
-                in: 0...max(audio.duration, 0.01)
+                in: 0...max(audio.duration, 0.01),
+                onEditingChanged: { editing in
+                    if editing {
+                        scrubTime = min(audio.currentTime, max(audio.duration, 0))
+                        isScrubbing = true
+                    } else {
+                        let target = scrubTime
+                        isScrubbing = false
+                        audio.seek(to: target)
+                    }
+                }
             )
             .tint(.white)
 
             HStack {
-                Text(time(audio.currentTime))
+                Text(time(displayedTime))
                 Spacer()
-                Text("-" + time(max(0, audio.duration - audio.currentTime)))
+                Text("-" + time(max(0, audio.duration - displayedTime)))
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(USTheme.secondary)

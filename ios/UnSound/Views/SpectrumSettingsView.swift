@@ -116,7 +116,6 @@ private struct SettingsContent: View {
         case downloads
         case sharedSync
         case pcSync
-        case performance
         case orb
         case knob
         case bass
@@ -146,15 +145,6 @@ private struct SettingsContent: View {
                     .padding(.bottom, 4)
 
                     languageCard
-
-                    sectionCard(
-                        .performance,
-                        title: "PERFORMANCE",
-                        subtitle: audio.performanceStatusText,
-                        icon: "speedometer"
-                    ) {
-                        performanceContent
-                    }
 
                     if openDownloads != nil {
                         sectionCard(
@@ -414,39 +404,6 @@ private struct SettingsContent: View {
                         }
                         Spacer()
                         if audio.outputMode == mode {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(USTheme.accent)
-                        }
-                    }
-                    .foregroundStyle(.white)
-                    .padding(12)
-                    .background(Color.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-                }
-                .buttonStyle(USPressStyle())
-            }
-        }
-    }
-
-    private var performanceContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(AppLocalization.text("Automatic detects frame drops and temporarily simplifies waveform effects. Audio quality never changes."))
-                .font(.caption)
-                .foregroundStyle(USTheme.secondary)
-
-            ForEach(VisualPerformanceMode.allCases) { mode in
-                Button {
-                    audio.visualPerformanceMode = mode
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: mode == .automatic ? "wand.and.stars" : (mode == .smooth ? "hare.fill" : "waveform.path.ecg"))
-                            .font(.headline)
-                            .frame(width: 34, height: 34)
-                            .background(audio.visualPerformanceMode == mode ? USTheme.accent.opacity(0.18) : Color.white.opacity(0.04), in: Circle())
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(AppLocalization.text(mode.rawValue)).font(.subheadline.bold())
-                            Text(AppLocalization.text(mode.subtitle)).font(.caption2).foregroundStyle(USTheme.secondary)
-                        }
-                        Spacer()
-                        if audio.visualPerformanceMode == mode {
                             Image(systemName: "checkmark.circle.fill").foregroundStyle(USTheme.accent)
                         }
                     }

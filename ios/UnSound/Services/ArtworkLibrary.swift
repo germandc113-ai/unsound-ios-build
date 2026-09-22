@@ -17,13 +17,13 @@ private let customArtworkImageCache: NSCache<NSString, UIImage> = {
 @MainActor
 extension LibraryStore {
     func customArtworkURL(for track: Track) -> URL? {
-        guard let filename = track.customArtworkFilename else { return nil }
+        guard let filename = track.customArtworkFilename ?? self.track(track.id)?.customArtworkFilename else { return nil }
         let url = artworkDirectory.appendingPathComponent(filename)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     func customArtworkImage(for track: Track) -> UIImage? {
-        guard let filename = track.customArtworkFilename else { return nil }
+        guard let filename = track.customArtworkFilename ?? self.track(track.id)?.customArtworkFilename else { return nil }
         let key = filename as NSString
 
         if let cached = customArtworkImageCache.object(forKey: key) {
