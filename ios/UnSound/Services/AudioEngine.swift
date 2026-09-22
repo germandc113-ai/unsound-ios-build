@@ -13,6 +13,32 @@ private struct SpectrumFrame {
     let levels: [Double]
 }
 
+enum VisualPerformanceMode: String, CaseIterable, Identifiable {
+    case automatic = "Automatic"
+    case smooth = "Smooth"
+    case quality = "Quality"
+
+    var id: String { rawValue }
+
+    var subtitle: String {
+        switch self {
+        case .automatic: return "Reduces live visuals only when frame drops are detected"
+        case .smooth: return "Prioritizes fast swiping and low UI load"
+        case .quality: return "Keeps maximum waveform detail"
+        }
+    }
+}
+
+private struct AudioVisualState: Equatable {
+    var bass = 0.0
+    var mids = 0.0
+    var highs = 0.0
+    var dominantBassFrequency = 0.0
+    var spectrum = Array(repeating: 0.0, count: 24)
+
+    static let zero = AudioVisualState()
+}
+
 private final class SpectrumAnalyzerCore {
     private let fftSize = 2048
     private let visibleBandCount = 24
@@ -36,7 +62,7 @@ private final class SpectrumAnalyzerCore {
 
     func configure(constrained: Bool, enabled: Bool) {
         stateLock.lock()
-        minimumInterval = constrained ? (1.0 / 5.0) : (1.0 / 15.0)
+        minimumInterval = constrained ? (1.0 / 8.0) : (1.0 / 12.0)
         analysisEnabled = enabled
         if !enabled { lastAcceptedTime = 0 }
         stateLock.unlock()
@@ -160,12 +186,23 @@ final class AudioEngine: ObservableObject {
         }
     }
 
-    @Published var visualBassEnergy: Double = 0
-    @Published var visualMidEnergy: Double = 0
-    @Published var visualHighEnergy: Double = 0
-    @Published var dominantBassFrequency: Double = 0
-    @Published var visualSpectrum: [Double] = Array(repeating: 0, count: 24)
+    @Published private var visualState = AudioVisualState.zero
     @Published private(set) var performanceLimited = false
+    @Published var visualPerformanceMode: VisualPerformanceMode {
+        didSet {
+            UserDefaults.standard.set(visualPerformanceMode.rawValue, forKey: "unsound.visualPerformanceMode")
+            refreshPerformanceState()
+        }
+    }
+
+    var visualBassEnergy: Double { visualState.bass }
+    var visualMidEnergy: Double { visualState.mids }
+    var visualHighEnergy: Double { visualState.highs }
+    var dominantBassFrequency: Double { visualState.dominantBassFrequency }
+    var visualSpectrum: [Double] { visualState.spectrum }
+    var performanceStatusText: String {
+        performanceLimited ? "Smooth visuals active" : "Full visual quality"
+    }
 
     var onFinished: (() -> Void)?
     var onNext: (() -> Void)?
@@ -182,6 +219,7 @@ final class AudioEngine: ObservableObject {
     private var file: AVAudioFile?
     private var startFrame: AVAudioFramePosition = 0
     private var timer: Timer?
+    private var performanceProbeTimer: Timer?
     private var notificationTokens: [NSObjectProtocol] = []
     private var resumeAfterInterruption = false
     private var scheduleID = UUID()
@@ -189,9 +227,14 @@ final class AudioEngine: ObservableObject {
     private var timerTick = 0
     private var audioInterrupted = false
     private var appIsActive = true
+    private var expectedPerformanceProbeTime: TimeInterval = 0
+    private var adaptivePerformanceLimitedUntil: TimeInterval = 0
 
     init() {
         outputMode = BassOutputMode(rawValue: UserDefaults.standard.string(forKey: "bassOutputMode") ?? "") ?? .car
+        visualPerformanceMode = VisualPerformanceMode(
+            rawValue: UserDefaults.standard.string(forKey: "unsound.visualPerformanceMode") ?? ""
+        ) ?? .automatic
         UIDevice.current.isBatteryMonitoringEnabled = true
         appIsActive = UIApplication.shared.applicationState == .active
         configureSession()
@@ -200,10 +243,12 @@ final class AudioEngine: ObservableObject {
         configureNotifications()
         refreshPerformanceState()
         startTimer()
+        startPerformanceProbe()
     }
 
     deinit {
         timer?.invalidate()
+        performanceProbeTimer?.invalidate()
         for token in notificationTokens { NotificationCenter.default.removeObserver(token) }
     }
 
@@ -219,11 +264,7 @@ final class AudioEngine: ObservableObject {
             startFrame = 0
             unreportedListenSeconds = 0
             timerTick = 0
-            visualBassEnergy = 0
-            visualMidEnergy = 0
-            visualHighEnergy = 0
-            dominantBassFrequency = 0
-            visualSpectrum = Array(repeating: 0, count: 24)
+            visualState = .zero
 
             if var info = MPNowPlayingInfoCenter.default().nowPlayingInfo {
                 info.removeValue(forKey: MPMediaItemPropertyArtwork)
@@ -370,30 +411,35 @@ final class AudioEngine: ObservableObject {
                         return current + (target - current) * amount
                     }
 
-                    self.visualBassEnergy = smooth(self.visualBassEnergy, frame.bass)
-                    self.visualMidEnergy = smooth(self.visualMidEnergy, frame.mids)
-                    self.visualHighEnergy = smooth(self.visualHighEnergy, frame.highs)
+                    var next = self.visualState
+                    next.bass = smooth(next.bass, frame.bass)
+                    next.mids = smooth(next.mids, frame.mids)
+                    next.highs = smooth(next.highs, frame.highs)
 
-                    if self.visualSpectrum.count != frame.levels.count {
-                        self.visualSpectrum = frame.levels
+                    if next.spectrum.count != frame.levels.count {
+                        next.spectrum = frame.levels
                     } else {
-                        var nextSpectrum = self.visualSpectrum
+                        var nextSpectrum = next.spectrum
                         for index in frame.levels.indices {
                             nextSpectrum[index] = smooth(nextSpectrum[index], frame.levels[index])
                         }
-                        self.visualSpectrum = nextSpectrum
+                        next.spectrum = nextSpectrum
                     }
 
                     if frame.dominantBassFrequency > 0 {
-                        if self.dominantBassFrequency <= 0 {
-                            self.dominantBassFrequency = frame.dominantBassFrequency
+                        if next.dominantBassFrequency <= 0 {
+                            next.dominantBassFrequency = frame.dominantBassFrequency
                         } else {
-                            self.dominantBassFrequency += (frame.dominantBassFrequency - self.dominantBassFrequency) * 0.32
+                            next.dominantBassFrequency += (frame.dominantBassFrequency - next.dominantBassFrequency) * 0.32
                         }
                     } else {
-                        self.dominantBassFrequency *= 0.84
-                        if self.dominantBassFrequency < 8 { self.dominantBassFrequency = 0 }
+                        next.dominantBassFrequency *= 0.84
+                        if next.dominantBassFrequency < 8 { next.dominantBassFrequency = 0 }
                     }
+
+                    // One published change per analyzer frame instead of five.
+                    // This substantially reduces SwiftUI invalidations while swiping.
+                    self.visualState = next
                 }
             }
         }
@@ -529,6 +575,31 @@ final class AudioEngine: ObservableObject {
         timer?.tolerance = 0.08
     }
 
+    private func startPerformanceProbe() {
+        let interval = 0.5
+        expectedPerformanceProbeTime = ProcessInfo.processInfo.systemUptime + interval
+        let probe = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.measureMainThreadResponsiveness(interval: interval) }
+        }
+        probe.tolerance = 0.01
+        RunLoop.main.add(probe, forMode: .common)
+        performanceProbeTimer = probe
+    }
+
+    private func measureMainThreadResponsiveness(interval: TimeInterval) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let delay = max(0, now - expectedPerformanceProbeTime)
+        expectedPerformanceProbeTime = now + interval
+
+        if appIsActive, isPlaying, delay > 0.045 {
+            adaptivePerformanceLimitedUntil = now + 8
+            refreshPerformanceState()
+        } else if adaptivePerformanceLimitedUntil > 0, now >= adaptivePerformanceLimitedUntil {
+            adaptivePerformanceLimitedUntil = 0
+            refreshPerformanceState()
+        }
+    }
+
     private func reportListenIfNeeded(force: Bool = false) {
         guard let track = currentTrack, unreportedListenSeconds > 0 else { return }
         guard force || unreportedListenSeconds >= 15 else { return }
@@ -636,7 +707,11 @@ final class AudioEngine: ObservableObject {
         let level = device.batteryLevel
         let lowBattery = level >= 0 && level <= 0.20 && device.batteryState != .charging && device.batteryState != .full
         let captured = UIScreen.main.isCaptured
-        let constrained = process.isLowPowerModeEnabled || lowBattery || thermalLimited || captured || audioInterrupted
+        let systemConstrained = process.isLowPowerModeEnabled || lowBattery || thermalLimited || captured || audioInterrupted
+        let now = process.systemUptime
+        let adaptiveConstrained = visualPerformanceMode == .smooth ||
+            (visualPerformanceMode == .automatic && now < adaptivePerformanceLimitedUntil)
+        let constrained = systemConstrained || adaptiveConstrained
 
         if performanceLimited != constrained {
             performanceLimited = constrained
