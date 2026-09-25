@@ -52,6 +52,8 @@ final class CloudSyncCoordinator: ObservableObject {
     private var playbackTimer: Timer?
     private var lastAppliedPlaybackSyncID: String?
     private var isApplyingPlayback = false
+    private var isPublishingPartyState = false
+    private var partyPublishedAssetID: String?
     private var partyID: String?
     private var partyStartedAt: Date?
 
@@ -85,7 +87,6 @@ final class CloudSyncCoordinator: ObservableObject {
 
     private struct PairInviteResponse: Codable {
         var code: String
-        var expiresAt: Date
     }
 
     private struct PairJoinResponse: Codable {
@@ -314,6 +315,7 @@ final class CloudSyncCoordinator: ObservableObject {
         }
         partyID = UUID().uuidString
         partyStartedAt = Date()
+        partyPublishedAssetID = nil
         isListeningPartyHost = true
         isListeningPartyFollower = false
         await publishPartyState()
@@ -345,6 +347,17 @@ final class CloudSyncCoordinator: ObservableObject {
         defer { isSyncing = false }
 
         do {
+            // A manual hand-off must also make the current audio available.
+            // Otherwise the receiver can only jump when it already owns the
+            // exact same local file.
+            let currentAudioReady = silent
+                ? true
+                : await publishCurrentPlaybackAudio(
+                    library: library,
+                    endpoint: endpoint,
+                    code: code
+                )
+
             // The shared space carries song references/audio availability, not
             // personal likes or playlists. Those remain local to each iPhone.
             var remoteSnapshot: Snapshot?
@@ -383,7 +396,9 @@ final class CloudSyncCoordinator: ObservableObject {
             if !silent {
                 status = outgoingPlayback == nil
                     ? "Shared songs synced • \(library.tracks.count) tracks"
-                    : "Playback + shared songs synced"
+                    : (currentAudioReady
+                        ? "Playback + song synced"
+                        : "Playback sent • song file unavailable")
             }
         } catch {
             if !silent { status = "Cloud sync failed: \(error.localizedDescription)" }
@@ -643,8 +658,8 @@ final class CloudSyncCoordinator: ObservableObject {
                 // Shared Sync is intentionally not a shared account. Likes
                 // remain personal on each iPhone.
                 isLiked: false,
-                audioAssetID: nil,
-                audioExtension: nil
+                audioAssetID: asset?.assetID,
+                audioExtension: asset?.fileExtension
             )
         }
 
@@ -723,6 +738,7 @@ final class CloudSyncCoordinator: ObservableObject {
         defaults.set(clean, forKey: "unsound.cloud.spaceCode")
         defaults.set(Self.defaultEndpoint, forKey: "unsound.libraryCloud.endpoint")
         defaults.set(clean, forKey: "unsound.libraryCloud.code")
+        partyPublishedAssetID = nil
         NotificationCenter.default.post(name: .unSoundConnectionChanged, object: nil)
     }
 
@@ -794,7 +810,8 @@ final class CloudSyncCoordinator: ObservableObject {
     }
 
     private func publishPartyState() async {
-        guard isListeningPartyHost,
+        guard !isPublishingPartyState,
+              isListeningPartyHost,
               let partyID,
               let startedAt = partyStartedAt,
               let endpoint = normalizedEndpoint,
@@ -802,12 +819,29 @@ final class CloudSyncCoordinator: ObservableObject {
               let audio,
               let track = audio.currentTrack else { return }
 
+        isPublishingPartyState = true
+        defer { isPublishingPartyState = false }
+
         var assetID: String?
         var fileExtension: String?
         if let fileURL = library?.localURL(for: track),
            let info = try? await resolvedAssetInfo(trackKey: stableKey(for: track), url: fileURL) {
-            assetID = info.assetID
-            fileExtension = info.fileExtension
+            do {
+                if partyPublishedAssetID != info.assetID {
+                    try await ensureCloudAudioAsset(
+                        info: info,
+                        fileURL: fileURL,
+                        endpoint: endpoint,
+                        code: code
+                    )
+                    partyPublishedAssetID = info.assetID
+                }
+                assetID = info.assetID
+                fileExtension = info.fileExtension
+            } catch {
+                // Playback state remains usable for a song already present on
+                // the follower even if this file upload fails.
+            }
         }
 
         let state = PartyState(
@@ -1194,6 +1228,74 @@ final class CloudSyncCoordinator: ObservableObject {
         endpoint
             .appendingPathComponent("shared-audio")
             .appendingPathComponent(assetID)
+    }
+
+    private func publishCurrentPlaybackAudio(
+        library: LibraryStore,
+        endpoint: URL,
+        code: String
+    ) async -> Bool {
+        guard let track = audio?.currentTrack,
+              let fileURL = library.localURL(for: track) else { return false }
+
+        let key = stableKey(for: track)
+        do {
+            let info = try await resolvedAssetInfo(trackKey: key, url: fileURL)
+            let exists = try await assetExists(assetID: info.assetID, endpoint: endpoint, code: code)
+            if !exists {
+                try await uploadAsset(
+                    info: info,
+                    fileURL: fileURL,
+                    endpoint: endpoint,
+                    code: code
+                )
+            }
+
+            publishedAssetIDs.insert(info.assetID)
+            remoteAssetByTrackKey[key] = RemoteAsset(
+                assetID: info.assetID,
+                fileExtension: info.fileExtension
+            )
+            persistAssetCache()
+            persistPublishedAssets()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func ensureCloudAudioAsset(
+        info: CachedAsset,
+        fileURL: URL,
+        endpoint: URL,
+        code: String
+    ) async throws {
+        let url = endpoint
+            .appendingPathComponent("cloud-audio")
+            .appendingPathComponent(info.assetID)
+
+        var head = URLRequest(url: url)
+        head.httpMethod = "HEAD"
+        head.timeoutInterval = 15
+        head.setValue("Bearer \(code)", forHTTPHeaderField: "Authorization")
+        let (_, headResponse) = try await URLSession.shared.data(for: head)
+        if let http = headResponse as? HTTPURLResponse, (200...299).contains(http.statusCode) {
+            return
+        }
+        if let http = headResponse as? HTTPURLResponse, http.statusCode != 404 {
+            throw HTTPError(code: http.statusCode)
+        }
+
+        var upload = URLRequest(url: url)
+        upload.httpMethod = "PUT"
+        upload.timeoutInterval = 180
+        upload.setValue("Bearer \(code)", forHTTPHeaderField: "Authorization")
+        upload.setValue(info.fileExtension, forHTTPHeaderField: "X-UnSound-Extension")
+        upload.setValue(contentType(for: info.fileExtension), forHTTPHeaderField: "Content-Type")
+        let (_, response) = try await URLSession.shared.upload(for: upload, fromFile: fileURL)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw HTTPError(code: (response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
     }
 
     private func localTrack(forCloudKey key: String, in library: LibraryStore) -> Track? {
