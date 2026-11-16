@@ -276,3 +276,14 @@
 "That result has no synced timing." = "У этого результата нет синхронизированного тайминга.";
 "Type it directly, e.g. 18.237 sec or 18237 ms" = "Введите напрямую, например 18,237 сек. или 18237 мс";
 "Use the same endpoint and sync code on both iPhones. Your libraries, likes and playlists stay separate. SYNC NOW sends only the current song + playback position." = "Используйте одинаковый адрес и код синхронизации на обоих iPhone. Медиатеки, лайки и плейлисты остаются раздельными. СИНХРОНИЗИРОВАТЬ отправляет только текущий трек и позицию.";
+
+"Queue" = "Очередь";
+
+"Sub bass" = "Саб-бас";
+"Kick" = "Ударный бас";
+"Peak limiter" = "Лимитер пиков";
+"Match song volume" = "Выравнивать громкость треков";
+"Reset bass detail" = "Сбросить настройки баса";
+"Playback failed" = "Ошибка воспроизведения";
+"Limits output peaks after EQ and effects. Hardware Sensory Bass is adjusted on your headphones." = "Ограничивает пики после эквалайзера и эффектов. Sensory Bass регулируется на наушниках.";
+"Reduces loud songs using a background RMS estimate. New measurements apply on the next play; quiet songs are not amplified." = "Уменьшает громкость громких треков по фоновой оценке RMS. Новые измерения применяются при следующем воспроизведении; тихие треки не усиливаются.";

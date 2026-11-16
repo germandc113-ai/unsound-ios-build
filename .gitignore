@@ -1,0 +1,13 @@
+# Generated projects, builds and audio stay out of Git.
+.DS_Store
+DerivedData/
+build/
+Payload/
+*.ipa
+*.xcarchive
+*.xcodeproj/
+*.xcworkspace/
+*.mp3
+*.m4a
+*.wav
+*.flac

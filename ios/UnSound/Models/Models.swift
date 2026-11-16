@@ -22,6 +22,7 @@ struct Track: Codable, Identifiable, Hashable {
     var source: String = "local"
     var sourceID: String? = nil
     var localFilename: String? = nil
+    var contentFingerprint: String? = nil
     var artworkURL: String? = nil
     var customArtworkFilename: String? = nil
     var providerURL: String? = nil

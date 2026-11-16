@@ -39,6 +39,7 @@ extension LibraryStore {
         try fileManager.copyItem(at: sourceURL, to: destination)
 
         tracks[index].localFilename = storedName
+        tracks[index].contentFingerprint = nil
         let updated = tracks[index]
         save()
         return updated

@@ -5,9 +5,20 @@ on:
   push:
     branches:
       - main
+      - fix/build-43-playback
     paths:
       - "ios/**"
       - ".github/workflows/build-ios.yml"
+      - "tests/**"
+
+# Only the newest revision of each branch should consume a macOS runner.
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write
 
 jobs:
   build:
@@ -15,6 +26,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Test playback queue
+        run: |
+          cat ios/UnSound/Models/Models.swift ios/UnSound/Services/PlaybackQueue.swift ios/UnSound/Services/PlaybackSession.swift ios/UnSound/Services/AudioLevelPolicy.swift tests/PlaybackQueueTests.swift > "$RUNNER_TEMP/queue-tests.swift"
+          swift "$RUNNER_TEMP/queue-tests.swift"
+
+      - name: Test imports and audio processing
+        run: |
+          cat ios/UnSound/Services/FileFingerprint.swift ios/UnSound/Services/AudioLevelPolicy.swift ios/UnSound/Services/AudioLevelAnalyzer.swift ios/UnSound/Services/AudioOutputProtection.swift tests/AudioImportTests.swift > "$RUNNER_TEMP/audio-tests.swift"
+          swift "$RUNNER_TEMP/audio-tests.swift"
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -81,3 +102,15 @@ jobs:
           name: UnSound-iOS-unsigned
           path: ios/UnSound.ipa
           if-no-files-found: error
+          retention-days: 3
+
+      - name: Keep only the three newest successful IPA artifacts
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" --jq '.artifacts[] | select(.name == "UnSound-iOS-unsigned" and .expired == false) | [.created_at, (.id | tostring)] | @tsv' > "$RUNNER_TEMP/ipa-artifacts.tsv"
+          sort -r "$RUNNER_TEMP/ipa-artifacts.tsv" | tail -n +4 | cut -f2 | while read -r artifact_id; do
+            test -n "$artifact_id" || continue
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id"
+          done

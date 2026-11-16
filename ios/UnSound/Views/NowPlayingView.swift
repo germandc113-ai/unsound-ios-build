@@ -23,10 +23,15 @@ struct NowPlayingView: View {
 
             ScrollView {
                 VStack(spacing: 20) {
+                    if let error = audio.playbackError {
+                        Text(AppLocalization.text("Playback failed") + ": " + error)
+                            .font(.caption).foregroundStyle(.red)
+                    }
                     if let track = audio.currentTrack {
                         tuningSection(track)
                         compactNowPlaying(track)
                         progressSection
+                        PlaybackQueueButton(player: player, library: library)
                     } else {
                         VStack(spacing: 16) {
                             ZStack {

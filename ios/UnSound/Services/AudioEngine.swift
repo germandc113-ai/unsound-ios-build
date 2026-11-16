@@ -4,6 +4,7 @@ import MediaPlayer
 import Combine
 import Accelerate
 import UIKit
+import AudioToolbox
 
 private struct SpectrumFrame {
     let bass: Double
@@ -23,6 +24,7 @@ private final class SpectrumAnalyzerCore {
     private var minimumInterval: TimeInterval = 1.0 / 12.0
     private var lastAcceptedTime: TimeInterval = 0
     private var analysisEnabled = false
+    private var analysisInFlight = false
 
     init() {
         setup = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(fftSize), .FORWARD)
@@ -47,23 +49,32 @@ private final class SpectrumAnalyzerCore {
         stateLock.lock()
         defer { stateLock.unlock() }
 
-        guard analysisEnabled else { return false }
+        guard analysisEnabled, !analysisInFlight else { return false }
         guard lastAcceptedTime == 0 || now - lastAcceptedTime >= minimumInterval else { return false }
         lastAcceptedTime = now
+        analysisInFlight = true
         return true
+    }
+
+    private func finishAnalysis() {
+        stateLock.lock()
+        analysisInFlight = false
+        stateLock.unlock()
     }
 
     func process(_ buffer: AVAudioPCMBuffer, completion: @escaping (SpectrumFrame) -> Void) {
         guard shouldAnalyze() else { return }
-        guard let channel = buffer.floatChannelData?[0] else { return }
+        guard let channel = buffer.floatChannelData?[0] else { finishAnalysis(); return }
         let count = min(Int(buffer.frameLength), fftSize)
-        guard count > 64 else { return }
+        guard count > 64 else { finishAnalysis(); return }
 
         let samples = Array(UnsafeBufferPointer(start: channel, count: count))
         let sampleRate = buffer.format.sampleRate
 
         queue.async { [weak self] in
-            guard let self, let setup = self.setup else { return }
+            guard let self else { return }
+            defer { self.finishAnalysis() }
+            guard let setup = self.setup else { return }
 
             var inputReal = [Float](repeating: 0, count: self.fftSize)
             var inputImag = [Float](repeating: 0, count: self.fftSize)
@@ -153,6 +164,22 @@ final class AudioEngine: ObservableObject {
     @Published var speed: Double = 1 { didSet { timePitch.rate = Float(max(0.5, min(2, speed))); updateNowPlaying() } }
     @Published var pitchSemitones: Double = 0 { didSet { timePitch.pitch = Float(pitchSemitones * 100) } }
     @Published var repeatMode: RepeatMode = .off
+    @Published var subBassTrim: Double = 0 {
+        didSet { UserDefaults.standard.set(AudioLevelPolicy.clampedTrim(subBassTrim), forKey: "unsound.subBassTrim"); applyBassProcessing() }
+    }
+    @Published var kickTrim: Double = 0 {
+        didSet { UserDefaults.standard.set(AudioLevelPolicy.clampedTrim(kickTrim), forKey: "unsound.kickTrim"); applyBassProcessing() }
+    }
+    @Published var limiterEnabled = true {
+        didSet { UserDefaults.standard.set(limiterEnabled, forKey: "unsound.limiterEnabled"); limiter.bypass = !limiterEnabled }
+    }
+    @Published var volumeMatchingEnabled = true {
+        didSet {
+            UserDefaults.standard.set(volumeMatchingEnabled, forKey: "unsound.volumeMatchingEnabled")
+            levelEQ.globalGain = Float(volumeMatchingEnabled ? currentMatchingGain : 0)
+        }
+    }
+    @Published private(set) var playbackError: String?
     @Published var outputMode: BassOutputMode {
         didSet {
             UserDefaults.standard.set(outputMode.rawValue, forKey: "bassOutputMode")
@@ -167,6 +194,7 @@ final class AudioEngine: ObservableObject {
     private(set) var visualSpectrum: [Double] = Array(repeating: 0, count: 24)
     @Published private(set) var performanceLimited = false
 
+    var onPlaybackCheckpoint: (() -> Void)?
     var onFinished: (() -> Void)?
     var onNext: (() -> Void)?
     var onPrevious: (() -> Void)?
@@ -178,6 +206,21 @@ final class AudioEngine: ObservableObject {
     private let distortion = AVAudioUnitDistortion()
     private let reverb = AVAudioUnitReverb()
     private let timePitch = AVAudioUnitTimePitch()
+    private let levelEQ = AVAudioUnitEQ(numberOfBands: 0)
+    private let limiter = AudioOutputProtection.makeLimiter()
+    private struct PreparedFile {
+        let url: URL
+        let file: AVAudioFile
+        let gain: Double
+    }
+    private var preparedFile: PreparedFile?
+    private var preparationTask: Task<PreparedFile?, Never>?
+    private var preparationID = UUID()
+    private var preparationURL: URL?
+    private var levelTask: Task<Void, Never>?
+    private var knownMatchingGains: [URL: Double] = [:]
+    private var currentMatchingGain = 0.0
+    private var playbackFormat: AVAudioFormat?
     private let spectrumAnalyzer = SpectrumAnalyzerCore()
     private var file: AVAudioFile?
     private var startFrame: AVAudioFramePosition = 0
@@ -192,6 +235,11 @@ final class AudioEngine: ObservableObject {
 
     init() {
         outputMode = BassOutputMode(rawValue: UserDefaults.standard.string(forKey: "bassOutputMode") ?? "") ?? .car
+        let defaults = UserDefaults.standard
+        subBassTrim = AudioLevelPolicy.clampedTrim(defaults.double(forKey: "unsound.subBassTrim"))
+        kickTrim = AudioLevelPolicy.clampedTrim(defaults.double(forKey: "unsound.kickTrim"))
+        limiterEnabled = defaults.object(forKey: "unsound.limiterEnabled") as? Bool ?? true
+        volumeMatchingEnabled = defaults.object(forKey: "unsound.volumeMatchingEnabled") as? Bool ?? true
         UIDevice.current.isBatteryMonitoringEnabled = true
         appIsActive = UIApplication.shared.applicationState == .active
         configureSession()
@@ -203,20 +251,46 @@ final class AudioEngine: ObservableObject {
     }
 
     deinit {
+        preparationTask?.cancel()
+        levelTask?.cancel()
         timer?.invalidate()
         for token in notificationTokens { NotificationCenter.default.removeObserver(token) }
     }
 
-    func load(track: Track, url: URL, autoplay: Bool = true) {
+    /// Open before stopping the current song so an unreadable import cannot
+    /// leave stale metadata claiming that a stopped player is still playing.
+    @discardableResult
+    func load(track: Track, url: URL, autoplay: Bool = true, position: Double = 0) -> Bool {
         do {
+            let candidate: AVAudioFile
+            if let prepared = preparedFile, prepared.url == url {
+                candidate = prepared.file
+                currentMatchingGain = prepared.gain
+            } else {
+                candidate = try AVAudioFile(forReading: url)
+                currentMatchingGain = knownMatchingGains[url] ?? 0
+            }
+            guard candidate.length > 0, candidate.processingFormat.sampleRate > 0 else {
+                throw NSError(domain: "UnSound.Audio", code: 1, userInfo: [NSLocalizedDescriptionKey: "Empty audio file"])
+            }
             reportListenIfNeeded(force: true)
             scheduleID = UUID()
             player.stop()
-            file = try AVAudioFile(forReading: url)
+            configurePlaybackFormat(candidate.processingFormat)
+            isPlaying = false
+            file = candidate
+            preparedFile = nil
+            preparationTask?.cancel()
+            preparationURL = nil
+            preparationID = UUID()
+            levelTask?.cancel()
+            playbackError = nil
             currentTrack = track
-            duration = Double(file!.length) / file!.processingFormat.sampleRate
-            currentTime = 0
-            startFrame = 0
+            duration = Double(candidate.length) / candidate.processingFormat.sampleRate
+            // Leave at least one frame to schedule; seeking to the exact end
+            // used to recursively advance and then restart the wrong song.
+            currentTime = position.isFinite ? min(max(0, duration - 1 / candidate.processingFormat.sampleRate), max(0, position)) : 0
+            startFrame = AVAudioFramePosition(currentTime * candidate.processingFormat.sampleRate)
             unreportedListenSeconds = 0
             timerTick = 0
             visualBassEnergy = 0
@@ -224,20 +298,62 @@ final class AudioEngine: ObservableObject {
             visualHighEnergy = 0
             dominantBassFrequency = 0
             visualSpectrum = Array(repeating: 0, count: 24)
+            levelEQ.globalGain = Float(volumeMatchingEnabled ? currentMatchingGain : 0)
 
             if var info = MPNowPlayingInfoCenter.default().nowPlayingInfo {
                 info.removeValue(forKey: MPMediaItemPropertyArtwork)
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = info
             }
-
-            schedule(from: 0)
-            if autoplay { play() } else { updateNowPlaying() }
+            schedule(from: startFrame)
+            if autoplay { play() } else { refreshPerformanceState(); updateNowPlaying() }
+            levelTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                if let gain = try? await AudioLevelAnalyzer.shared.analyze(url), !Task.isCancelled {
+                    if self?.knownMatchingGains.count ?? 0 >= 1000 { self?.knownMatchingGains.removeAll() }
+                    self?.knownMatchingGains[url] = gain
+                }
+            }
+            return true
         } catch {
-            print("Audio load failed", error)
+            playbackError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Retain only one primed decoder. Cancel outdated work on rapid skips.
+    func prepareNext(url: URL?) {
+        guard url != preparationURL else { return }
+        preparationTask?.cancel()
+        preparationTask = nil
+        preparedFile = nil
+        preparationURL = url
+        preparationID = UUID()
+        let requestID = preparationID
+        guard let url else { return }
+        let task = Task.detached(priority: .utility) { () -> PreparedFile? in
+            do {
+                try Task.checkCancellation()
+                let file = try AVAudioFile(forReading: url)
+                if let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096) {
+                    try file.read(into: buffer)
+                    file.framePosition = 0
+                }
+                let gain = try await AudioLevelAnalyzer.shared.analyze(url)
+                try Task.checkCancellation()
+                return PreparedFile(url: url, file: file, gain: gain)
+            } catch { return nil }
+        }
+        preparationTask = task
+        Task { [weak self] in
+            let result = await task.value
+            guard let self, self.preparationID == requestID else { return }
+            self.preparedFile = result
         }
     }
 
     func play() {
+        guard file != nil else { return }
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setActive(true)
@@ -247,14 +363,19 @@ final class AudioEngine: ObservableObject {
             refreshPerformanceState()
             updateNowPlaying()
         } catch {
-            print("Audio engine start failed", error)
+            isPlaying = false
+            playbackError = error.localizedDescription
+            refreshPerformanceState()
+            updateNowPlaying()
         }
     }
 
     func pause() {
         reportListenIfNeeded(force: true)
+        updatePlaybackPosition()
         player.pause()
         isPlaying = false
+        onPlaybackCheckpoint?()
         refreshPerformanceState()
         updateNowPlaying()
     }
@@ -264,7 +385,8 @@ final class AudioEngine: ObservableObject {
     func seek(to seconds: TimeInterval) {
         guard let f = file else { return }
         reportListenIfNeeded(force: true)
-        let clamped = max(0, min(duration, seconds))
+        guard seconds.isFinite else { return }
+        let clamped = max(0, min(max(0, duration - 1 / f.processingFormat.sampleRate), seconds))
         let frame = AVAudioFramePosition(clamped * f.processingFormat.sampleRate)
         let resume = isPlaying
         scheduleID = UUID()
@@ -273,6 +395,7 @@ final class AudioEngine: ObservableObject {
         currentTime = clamped
         schedule(from: frame)
         if resume { play() } else { updateNowPlaying() }
+        onPlaybackCheckpoint?()
     }
 
     func apply(_ preset: AudioPreset) {
@@ -344,14 +467,36 @@ final class AudioEngine: ObservableObject {
         engine.attach(distortion)
         engine.attach(reverb)
         engine.attach(timePitch)
+        engine.attach(levelEQ)
+        engine.attach(limiter)
+        limiter.bypass = !limiterEnabled
         engine.connect(player, to: eq, format: nil)
         engine.connect(eq, to: distortion, format: nil)
         engine.connect(distortion, to: reverb, format: nil)
         engine.connect(reverb, to: timePitch, format: nil)
-        engine.connect(timePitch, to: engine.mainMixerNode, format: nil)
+        engine.connect(timePitch, to: levelEQ, format: nil)
+        engine.connect(levelEQ, to: limiter, format: nil)
+        engine.connect(limiter, to: engine.mainMixerNode, format: nil)
 
         configureSpectrumTap()
         applyBassProcessing()
+        engine.prepare()
+    }
+
+    /// Player files must match the player node's sample rate and channel count.
+    /// Let the final mixer convert to the hardware rate, rather than playing
+    /// a 44.1 kHz import through a graph left configured for a 48 kHz file.
+    private func configurePlaybackFormat(_ format: AVAudioFormat) {
+        if let previous = playbackFormat,
+           previous.sampleRate == format.sampleRate && previous.channelCount == format.channelCount { return }
+        engine.stop()
+        let chain: [AVAudioNode] = [player, eq, distortion, reverb, timePitch, levelEQ, limiter]
+        for node in chain { engine.disconnectNodeOutput(node) }
+        for index in 0..<(chain.count - 1) {
+            engine.connect(chain[index], to: chain[index + 1], format: format)
+        }
+        engine.connect(limiter, to: engine.mainMixerNode, format: format)
+        playbackFormat = format
         engine.prepare()
     }
 
@@ -360,7 +505,7 @@ final class AudioEngine: ObservableObject {
         engine.mainMixerNode.installTap(onBus: 0, bufferSize: 2048, format: nil) { [weak self] buffer, _ in
             analyzer.process(buffer) { frame in
                 DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
+                    guard let self, self.isPlaying, self.appIsActive else { return }
 
                     let attack: Double = self.performanceLimited ? 0.58 : 0.42
                     let release: Double = self.performanceLimited ? 0.30 : 0.17
@@ -444,18 +589,19 @@ final class AudioEngine: ObservableObject {
         case .crusherANC2:
             // Crusher already adds physical low-end via Sensory Bass. Boosting
             // the deepest bands too aggressively mainly drives its DSP limiter,
-            // so emphasize 50–90 Hz and keep enough preamp headroom.
-            eq.bands[0].frequency = 46
-            eq.bands[1].frequency = 64
-            eq.bands[1].bandwidth = 0.62
-            eq.bands[2].frequency = 92
+            // so emphasize 40–95 Hz with headroom for overlapping filter peaks.
+            // The app cannot control the hardware Sensory Bass slider.
+            eq.bands[0].frequency = 42
+            eq.bands[1].frequency = 58
+            eq.bands[1].bandwidth = 0.80
+            eq.bands[2].frequency = 95
             eq.bands[2].bandwidth = 0.82
-            subGain = 8.0 * shaped
-            slamGain = 10.5 * shaped
-            punchGain = 6.0 * shaped
+            subGain = 10.0 * shaped
+            slamGain = 11.5 * shaped
+            punchGain = 5.0 * shaped
             midCut = -6.5 * pow(x, 1.10)
             highCut = -2.8 * pow(x, 1.06)
-            headroom = -10.0 * shaped
+            headroom = -16.0 * shaped
             outputScale = 1.0 - (0.06 * x)
 
         case .phone:
@@ -476,13 +622,15 @@ final class AudioEngine: ObservableObject {
             outputScale = 1.0 - (0.03 * x)
         }
 
-        eq.bands[0].gain = Float(subGain)
+        let subTrim = AudioLevelPolicy.scaledTrim(subBassTrim, bassDB: bassDB)
+        let punchTrim = AudioLevelPolicy.scaledTrim(kickTrim, bassDB: bassDB)
+        eq.bands[0].gain = Float(subGain + subTrim)
         eq.bands[1].gain = Float(slamGain)
-        eq.bands[2].gain = Float(punchGain)
+        eq.bands[2].gain = Float(punchGain + punchTrim)
         eq.bands[3].gain = Float(midCut)
         eq.bands[4].gain = Float(highCut)
-        eq.globalGain = Float(headroom)
-        engine.mainMixerNode.outputVolume = Float(max(0.78, outputScale))
+        eq.globalGain = Float(headroom - max(0, subTrim) - max(0, punchTrim))
+        engine.mainMixerNode.outputVolume = Float(max(0.78, outputScale) * 0.89)
     }
 
     private func schedule(from frame: AVAudioFramePosition) {
@@ -491,7 +639,7 @@ final class AudioEngine: ObservableObject {
         guard remaining > 0 else { handleFinished(); return }
         let id = UUID()
         scheduleID = id
-        player.scheduleSegment(f, startingFrame: frame, frameCount: AVAudioFrameCount(remaining), at: nil) { [weak self] in
+        player.scheduleSegment(f, startingFrame: frame, frameCount: AVAudioFrameCount(remaining), at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, self.scheduleID == id else { return }
                 self.handleFinished()
@@ -516,7 +664,7 @@ final class AudioEngine: ObservableObject {
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.33, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, let f = self.file, self.player.isPlaying else { return }
+                guard let self, self.file != nil, self.player.isPlaying else { return }
 
                 self.timerTick &+= 1
                 self.unreportedListenSeconds += 0.33
@@ -524,13 +672,8 @@ final class AudioEngine: ObservableObject {
 
                 if self.performanceLimited && self.timerTick % 2 != 0 { return }
 
-                guard let nodeTime = self.player.lastRenderTime,
-                      let pTime = self.player.playerTime(forNodeTime: nodeTime) else { return }
-
-                self.currentTime = min(
-                    self.duration,
-                    Double(self.startFrame + pTime.sampleTime) / f.processingFormat.sampleRate
-                )
+                self.updatePlaybackPosition()
+                if self.timerTick % 15 == 0 { self.onPlaybackCheckpoint?() }
 
                 // iOS extrapolates the Lock Screen position from elapsed time +
                 // playback rate. Rewriting the complete Now Playing dictionary
@@ -538,6 +681,12 @@ final class AudioEngine: ObservableObject {
             }
         }
         timer?.tolerance = 0.08
+    }
+
+    private func updatePlaybackPosition() {
+        guard let f = file, let nodeTime = player.lastRenderTime,
+              let time = player.playerTime(forNodeTime: nodeTime) else { return }
+        currentTime = min(duration, Double(startFrame + time.sampleTime) / f.processingFormat.sampleRate)
     }
 
     private func reportListenIfNeeded(force: Bool = false) {
@@ -625,6 +774,8 @@ final class AudioEngine: ObservableObject {
         notificationTokens.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 self?.appIsActive = false
+                self?.updatePlaybackPosition()
+                self?.onPlaybackCheckpoint?()
                 self?.refreshPerformanceState()
             }
         })
