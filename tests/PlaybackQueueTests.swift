@@ -53,3 +53,13 @@ assert(AudioLevelPolicy.matchingGainDB(rms: 0.5) < -11)
 assert(AudioLevelPolicy.matchingGainDB(rms: 1) == -18)
 assert(AudioLevelPolicy.clampedTrim(100) == 6 && AudioLevelPolicy.clampedTrim(-100) == -6)
 print("Session round trip, 4096-song growth, repeat scopes, deleted songs and gain bounds passed")
+
+// Existing library files predate contentFingerprint; they must still decode.
+let legacyTrack = Track(title: "Existing song", artist: "Artist")
+var legacyJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(legacyTrack)) as! [String: Any]
+legacyJSON.removeValue(forKey: "contentFingerprint")
+let decodedLegacy = try JSONDecoder().decode(Track.self, from: JSONSerialization.data(withJSONObject: legacyJSON))
+assert(decodedLegacy.id == legacyTrack.id && decodedLegacy.contentFingerprint == nil)
+PlaybackSessionStore.save(old)
+assert(PlaybackSessionStore.load()?.position == 37.5)
+print("Old library compatibility and saved playback checkpoint passed")

@@ -29,7 +29,7 @@ jobs:
 
       - name: Test playback queue
         run: |
-          cat ios/UnSound/Services/PlaybackQueue.swift ios/UnSound/Services/PlaybackSession.swift ios/UnSound/Services/AudioLevelPolicy.swift tests/PlaybackQueueTests.swift > "$RUNNER_TEMP/queue-tests.swift"
+          cat ios/UnSound/Models/Models.swift ios/UnSound/Services/PlaybackQueue.swift ios/UnSound/Services/PlaybackSession.swift ios/UnSound/Services/AudioLevelPolicy.swift tests/PlaybackQueueTests.swift > "$RUNNER_TEMP/queue-tests.swift"
           swift "$RUNNER_TEMP/queue-tests.swift"
 
       - name: Test imports and audio processing

@@ -596,6 +596,7 @@ final class LibraryStore: ObservableObject {
             )
         }
 
+        try await ImportFingerprintCache.shared.validateAudio(sourceURL)
         let fingerprint = try await ImportFingerprintCache.shared.fingerprint(sourceURL)
         if let existing = try await existingTrack(for: fingerprint, sourceURL: sourceURL) {
             switch duplicateBehavior {

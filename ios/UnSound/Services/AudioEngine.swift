@@ -220,6 +220,7 @@ final class AudioEngine: ObservableObject {
     private var levelTask: Task<Void, Never>?
     private var knownMatchingGains: [URL: Double] = [:]
     private var currentMatchingGain = 0.0
+    private var playbackFormat: AVAudioFormat?
     private let spectrumAnalyzer = SpectrumAnalyzerCore()
     private var file: AVAudioFile?
     private var startFrame: AVAudioFramePosition = 0
@@ -275,6 +276,7 @@ final class AudioEngine: ObservableObject {
             reportListenIfNeeded(force: true)
             scheduleID = UUID()
             player.stop()
+            configurePlaybackFormat(candidate.processingFormat)
             isPlaying = false
             file = candidate
             preparedFile = nil
@@ -478,6 +480,23 @@ final class AudioEngine: ObservableObject {
 
         configureSpectrumTap()
         applyBassProcessing()
+        engine.prepare()
+    }
+
+    /// Player files must match the player node's sample rate and channel count.
+    /// Let the final mixer convert to the hardware rate, rather than playing
+    /// a 44.1 kHz import through a graph left configured for a 48 kHz file.
+    private func configurePlaybackFormat(_ format: AVAudioFormat) {
+        if let previous = playbackFormat,
+           previous.sampleRate == format.sampleRate && previous.channelCount == format.channelCount { return }
+        engine.stop()
+        let chain: [AVAudioNode] = [player, eq, distortion, reverb, timePitch, levelEQ, limiter]
+        for node in chain { engine.disconnectNodeOutput(node) }
+        for index in 0..<(chain.count - 1) {
+            engine.connect(chain[index], to: chain[index + 1], format: format)
+        }
+        engine.connect(limiter, to: engine.mainMixerNode, format: format)
+        playbackFormat = format
         engine.prepare()
     }
 

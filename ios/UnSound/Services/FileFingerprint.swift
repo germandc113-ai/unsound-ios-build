@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import AVFoundation
 
 enum FileFingerprint {
     static func sha256(of url: URL) throws -> String {
@@ -19,6 +20,15 @@ enum FileFingerprint {
 actor ImportFingerprintCache {
     static let shared = ImportFingerprintCache()
     private var cache: [String: String] = [:]
+
+    func validateAudio(_ url: URL) throws {
+        try Task.checkCancellation()
+        let file = try AVAudioFile(forReading: url)
+        guard file.length > 0, file.processingFormat.sampleRate > 0 else {
+            throw NSError(domain: "UnSound.Import", code: 422,
+                          userInfo: [NSLocalizedDescriptionKey: "Empty or unreadable audio file"])
+        }
+    }
 
     func copy(from source: URL, to destination: URL) throws {
         try Task.checkCancellation()

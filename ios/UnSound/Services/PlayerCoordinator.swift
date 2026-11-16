@@ -419,7 +419,7 @@ final class PlayerCoordinator: ObservableObject {
                 base = baseLyrics
             } else {
                 base = try await lookupBaseLyrics(for: current)
-                guard audio.currentTrack?.id == current.id else { return }
+                guard !Task.isCancelled, audio.currentTrack?.id == current.id else { return }
                 baseLyrics = base
                 baseLyricsTrackID = current.id
             }
@@ -430,12 +430,12 @@ final class PlayerCoordinator: ObservableObject {
             }
 
             guard let vocalStart = await lyricsAutoSyncService.estimateVocalStart(url: localURL) else {
-                guard audio.currentTrack?.id == current.id else { return }
+                guard !Task.isCancelled, audio.currentTrack?.id == current.id else { return }
                 lyricsSyncStatus = "AUTO SYNC could not find a clear vocal start."
                 UserDefaults.standard.set(true, forKey: key)
                 return
             }
-            guard audio.currentTrack?.id == current.id else { return }
+            guard !Task.isCancelled, audio.currentTrack?.id == current.id else { return }
 
             let rawOffset = vocalStart - firstLyric.time
             let clamped = min(90.0, max(-15.0, rawOffset))
@@ -451,6 +451,7 @@ final class PlayerCoordinator: ObservableObject {
             let sign = offsetMs >= 0 ? "+" : ""
             lyricsSyncStatus = "AUTO SYNC \(sign)\(String(format: "%.1f", Double(offsetMs) / 1000.0)) s"
         } catch {
+            guard !Task.isCancelled, audio.currentTrack?.id == current.id else { return }
             lyricsSyncStatus = "AUTO SYNC failed."
         }
     }

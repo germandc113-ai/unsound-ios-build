@@ -68,6 +68,11 @@ try autoreleasepool {
 let finished = DispatchSemaphore(value: 0)
 Task.detached {
     do {
+        try await ImportFingerprintCache.shared.validateAudio(testFile)
+        do {
+            try await ImportFingerprintCache.shared.validateAudio(first)
+            fatalError("Invalid audio must be rejected")
+        } catch { }
         let measured = try await AudioLevelAnalyzer.shared.analyze(testFile)
         assert(abs(measured - AudioLevelPolicy.matchingGainDB(rms: 0.5)) < 0.1)
         let cached = await AudioLevelAnalyzer.shared.cachedGain(for: testFile)
