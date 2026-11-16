@@ -413,6 +413,7 @@ private struct SettingsContent: View {
                 }
                 .buttonStyle(USPressStyle())
             }
+            SoundPlaybackSettings(audio: audio)
         }
     }
 

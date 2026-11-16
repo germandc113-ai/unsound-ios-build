@@ -2,6 +2,11 @@ import Foundation
 
 /// Queue operations do not change library or playlist ordering.
 enum PlaybackQueue {
+    static func unique(_ ids: [UUID]) -> [UUID] {
+        var seen = Set<UUID>()
+        return ids.filter { seen.insert($0).inserted }
+    }
+
     static func libraryOrder(existing: [UUID], playable: [UUID], current: UUID) -> [UUID] {
         let available = Set(playable)
         var seen = Set<UUID>()

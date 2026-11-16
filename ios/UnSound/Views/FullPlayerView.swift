@@ -32,6 +32,10 @@ struct FullPlayerView: View {
                 VStack(spacing: 23) {
                     header
 
+                    if let error = audio.playbackError {
+                        Text(AppLocalization.text("Playback failed") + ": " + error)
+                            .font(.caption).foregroundStyle(.red)
+                    }
                     if let track = audio.currentTrack {
                         visualModePicker
                         artwork(track)

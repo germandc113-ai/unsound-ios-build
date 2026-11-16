@@ -87,9 +87,10 @@ struct SearchView: View {
             ) { result in
                 switch result {
                 case .success(let urls):
+                    Task { @MainActor in
                     var added: [Track] = []
                     for url in urls {
-                        if let track = try? library.importAudio(from: url) {
+                        if let track = try? await library.importAudio(from: url) {
                             added.append(track)
                         }
                     }
@@ -98,6 +99,7 @@ struct SearchView: View {
                         : "\(added.count) track\(added.count == 1 ? "" : "s") imported · 808 ready"
                     if let first = added.first {
                         player.play(first, queue: added)
+                    }
                     }
                 case .failure(let error):
                     libraryImportMessage = "Import failed · \(error.localizedDescription)"
@@ -111,20 +113,22 @@ struct SearchView: View {
                 switch result {
                 case .success(let urls):
                     guard let folder = urls.first else { return }
+                    Task { @MainActor in
                     do {
-                        let added = try library.importAudioCollection(from: folder)
+                        let added = try await library.importAudioCollection(from: folder)
                         libraryImportMessage = added.isEmpty
                             ? "Folder scanned · nothing new"
                             : "\(added.count) track\(added.count == 1 ? "" : "s") imported · 808 ready"
                     } catch {
                         libraryImportMessage = "Folder import failed · \(error.localizedDescription)"
                     }
+                    }
                 case .failure(let error):
                     libraryImportMessage = "Folder import failed · \(error.localizedDescription)"
                 }
             }
-            .onAppear {
-                let added = library.scanImportDropFolder()
+            .task {
+                let added = await library.scanImportDropFolder()
                 if !added.isEmpty {
                     libraryImportMessage = "\(added.count) new track\(added.count == 1 ? "" : "s") auto-imported"
                 }

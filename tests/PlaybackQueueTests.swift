@@ -24,3 +24,32 @@ assert(PlaybackQueue.advancing([], past: songs[0]).isEmpty)
 assert(PlaybackQueue.advancing([songs[0]], past: songs[0]) == [songs[0]])
 assert(PlaybackQueue.advancing([songs[1]], past: songs[0]) == [songs[1]])
 print("Playback queue: 150-song rotation, full coverage, additions, deletions, duplicates, empty and single-song queues passed")
+
+// The test size is deliberately above both 150 and typical page limits.
+let largeLibrary = (0..<4096).map { _ in UUID() }
+let old = PlaybackSession(queue: Array(largeLibrary.prefix(150)), repeatQueue: Array(largeLibrary.prefix(5)),
+                          history: [largeLibrary[0]], currentID: largeLibrary[2], position: 37.5, repeatMode: 0)
+let roundTrip = try JSONDecoder().decode(PlaybackSession.self, from: JSONEncoder().encode(old))
+let restored = roundTrip.reconciled(playable: largeLibrary)!
+assert(restored.queue.count == 4096 && restored.queue.first == largeLibrary[2])
+assert(restored.position == 37.5 && restored.repeatQueue.count == 5)
+var playlistSession = old
+playlistSession.repeatMode = 1
+assert(playlistSession.reconciled(playable: largeLibrary)!.queue == Array(largeLibrary.prefix(5)))
+playlistSession.repeatMode = 2
+assert(playlistSession.reconciled(playable: largeLibrary)!.currentID == largeLibrary[2])
+let missing = old.reconciled(playable: [largeLibrary[7]])!
+assert(missing.currentID == largeLibrary[7] && missing.position == 0)
+assert(old.reconciled(playable: []) == nil)
+var invalid = old
+invalid.position = .infinity
+invalid.repeatMode = 99
+assert(invalid.reconciled(playable: largeLibrary)!.position == 0)
+assert(invalid.reconciled(playable: largeLibrary)!.repeatMode == 0)
+assert(AudioLevelPolicy.matchingGainDB(rms: 0) == 0)
+assert(AudioLevelPolicy.matchingGainDB(rms: .nan) == 0)
+assert(AudioLevelPolicy.matchingGainDB(rms: 0.001) == 0)
+assert(AudioLevelPolicy.matchingGainDB(rms: 0.5) < -11)
+assert(AudioLevelPolicy.matchingGainDB(rms: 1) == -18)
+assert(AudioLevelPolicy.clampedTrim(100) == 6 && AudioLevelPolicy.clampedTrim(-100) == -6)
+print("Session round trip, 4096-song growth, repeat scopes, deleted songs and gain bounds passed")

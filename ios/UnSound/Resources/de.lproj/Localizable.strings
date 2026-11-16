@@ -278,3 +278,12 @@
 "Use the same endpoint and sync code on both iPhones. Your libraries, likes and playlists stay separate. SYNC NOW sends only the current song + playback position." = "Verwende auf beiden iPhones denselben Endpunkt und Sync-Code. Mediatheken, Likes und Playlists bleiben getrennt. JETZT SYNCHRONISIEREN sendet nur den aktuellen Song und die Wiedergabeposition.";
 
 "Queue" = "Warteschlange";
+
+"Sub bass" = "Tiefbass";
+"Kick" = "Kick";
+"Peak limiter" = "Spitzenpegel-Limiter";
+"Match song volume" = "Song-Lautstärke angleichen";
+"Reset bass detail" = "Bass-Feineinstellung zurücksetzen";
+"Playback failed" = "Wiedergabe fehlgeschlagen";
+"Limits output peaks after EQ and effects. Hardware Sensory Bass is adjusted on your headphones." = "Begrenzt Pegelspitzen nach EQ und Effekten. Sensory Bass stellst du direkt am Kopfhörer ein.";
+"Reduces loud songs using a background RMS estimate. New measurements apply on the next play; quiet songs are not amplified." = "Senkt laute Songs anhand einer RMS-Schätzung im Hintergrund ab. Neue Messwerte gelten beim nächsten Abspielen; leise Songs werden nicht verstärkt.";

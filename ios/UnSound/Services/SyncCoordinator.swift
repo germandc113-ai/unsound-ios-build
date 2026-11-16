@@ -249,19 +249,6 @@ final class SyncCoordinator: ObservableObject {
 
         applyStoredDeviceAudioSettings()
 
-        audio.$currentTrack
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard let self else { return }
-                self.restoringDeviceAudioSettings = true
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.applyStoredDeviceAudioSettings()
-                    self.restoringDeviceAudioSettings = false
-                }
-            }
-            .store(in: &audioCancellables)
-
         audio.$bassDB.dropFirst().sink { [weak self] value in
             guard let self, !self.restoringDeviceAudioSettings else { return }
             UserDefaults.standard.set(value, forKey: AudioSettingKey.bass)

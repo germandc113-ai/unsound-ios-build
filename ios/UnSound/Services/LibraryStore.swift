@@ -45,6 +45,22 @@ struct DuplicateImportRequest: Identifiable {
 }
 
 @MainActor
+private final class ImportGate {
+    private var busy = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !busy { busy = true; return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    func release() {
+        if waiting.isEmpty { busy = false }
+        else { waiting.removeFirst().resume() }
+    }
+}
+
+@MainActor
 final class LibraryStore: ObservableObject {
     @Published var tracks: [Track] = []
     @Published var playlists: [Playlist] = []
@@ -60,6 +76,8 @@ final class LibraryStore: ObservableObject {
 
     private let fileManager = FileManager.default
     private let persistenceWriter = LibraryPersistenceWriter()
+    private let importGate = ImportGate()
+    private var scanningImports = false
     private var pendingSaveTask: Task<Void, Never>?
     private let hiddenSuggestionsKey = "unsound.hiddenSuggestionIDs"
     private let supportedAudioExtensions: Set<String> = [
@@ -70,7 +88,7 @@ final class LibraryStore: ObservableObject {
         load()
         loadHiddenSuggestions()
         prepareImportDropFolder()
-        _ = scanImportDropFolder()
+        Task { [weak self] in _ = await self?.scanImportDropFolder() }
     }
 
     var likedTracks: [Track] { tracks.filter(\.isLiked) }
@@ -95,11 +113,11 @@ final class LibraryStore: ObservableObject {
         return url
     }
 
-    func importAudio(from sourceURL: URL) throws -> Track {
+    func importAudio(from sourceURL: URL) async throws -> Track {
         let access = sourceURL.startAccessingSecurityScopedResource()
         defer { if access { sourceURL.stopAccessingSecurityScopedResource() } }
 
-        let track = try importAudioFile(
+        let track = try await importAudioFile(
             from: sourceURL,
             source: "local",
             saveAfter: false,
@@ -109,22 +127,28 @@ final class LibraryStore: ObservableObject {
         return track
     }
 
-    func importAudioCollection(from rootURL: URL) throws -> [Track] {
-        try importAudioCollection(from: rootURL, duplicateBehavior: .queue)
+    func importAudioCollection(from rootURL: URL) async throws -> [Track] {
+        try await importAudioCollection(from: rootURL, duplicateBehavior: .queue)
     }
 
     @discardableResult
-    func scanImportDropFolder() -> [Track] {
+    func scanImportDropFolder() async -> [Track] {
+        guard !scanningImports else { return [] }
+        scanningImports = true
+        defer { scanningImports = false }
         prepareImportDropFolder()
-        return (try? importAudioCollection(from: importDropFolderURL, duplicateBehavior: .skip)) ?? []
+        return (try? await importAudioCollection(from: importDropFolderURL, duplicateBehavior: .skip)) ?? []
     }
 
     @discardableResult
-    func acceptCurrentDuplicate() -> Track? {
+    func acceptCurrentDuplicate() async -> Track? {
+        await importGate.acquire()
+        defer { importGate.release() }
+        guard !Task.isCancelled else { return nil }
         guard let request = duplicateImportQueue.first else { return nil }
 
         do {
-            let track = try storeAudioCopy(
+            let track = try await storeAudioCopy(
                 from: request.stagedURL,
                 source: request.source,
                 sourceID: request.fingerprint + "|duplicate|" + UUID().uuidString,
@@ -516,43 +540,22 @@ final class LibraryStore: ObservableObject {
     private func importAudioCollection(
         from rootURL: URL,
         duplicateBehavior: DuplicateBehavior
-    ) throws -> [Track] {
+    ) async throws -> [Track] {
         let access = rootURL.startAccessingSecurityScopedResource()
         defer { if access { rootURL.stopAccessingSecurityScopedResource() } }
-
+        let files = await ImportFingerprintCache.shared.audioFiles(in: rootURL, extensions: supportedAudioExtensions)
         var imported: [Track] = []
-        let resourceKeys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey]
-
-        if let values = try? rootURL.resourceValues(forKeys: [.isRegularFileKey]), values.isRegularFile == true {
-            if isSupportedAudio(rootURL),
-               let track = try? importAudioFile(
-                   from: rootURL,
-                   source: "bulk",
-                   saveAfter: false,
-                   duplicateBehavior: duplicateBehavior
-               ) {
+        for url in files {
+            try Task.checkCancellation()
+            guard !url.path.hasPrefix(mediaDirectory.path + "/") else { continue }
+            if let track = try? await importAudioFile(from: url, source: "bulk", saveAfter: false,
+                                                     duplicateBehavior: duplicateBehavior) {
                 imported.append(track)
-            }
-        } else if let enumerator = fileManager.enumerator(
-            at: rootURL,
-            includingPropertiesForKeys: resourceKeys,
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) {
-            for case let url as URL in enumerator {
-                guard isSupportedAudio(url) else { continue }
-                guard !url.path.hasPrefix(mediaDirectory.path) else { continue }
-                if let track = try? importAudioFile(
-                    from: url,
-                    source: "bulk",
-                    saveAfter: false,
-                    duplicateBehavior: duplicateBehavior
-                ) {
-                    imported.append(track)
-                }
+                // Save each successful import; a later file can fail or the app
+                // can background before a large folder has finished importing.
+                save()
             }
         }
-
-        if !imported.isEmpty { save() }
         return imported
     }
 
@@ -560,17 +563,20 @@ final class LibraryStore: ObservableObject {
         supportedAudioExtensions.contains(url.pathExtension.lowercased())
     }
 
-    private func importFingerprint(for url: URL) -> String {
-        let attributes = try? fileManager.attributesOfItem(atPath: url.path)
-        let size = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
-        return "\(url.lastPathComponent.lowercased())|\(size)"
-    }
-
-    private func existingTrack(for fingerprint: String) -> Track? {
-        tracks.first {
-            guard localURL(for: $0) != nil, let sourceID = $0.sourceID else { return false }
-            return sourceID == fingerprint || sourceID.hasPrefix(fingerprint + "|duplicate|")
+    private func existingTrack(for fingerprint: String, sourceURL: URL) async throws -> Track? {
+        let size = (try? sourceURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+        // Take IDs rather than array indexes across awaits: imports can insert
+        // tracks while background hashing is in progress.
+        for id in tracks.map(\.id) {
+            guard let track = track(id), let url = localURL(for: track) else { continue }
+            if track.contentFingerprint == fingerprint { return track }
+            guard track.contentFingerprint == nil,
+                  (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize == size else { continue }
+            let hash = try await ImportFingerprintCache.shared.fingerprint(url)
+            if let index = tracks.firstIndex(where: { $0.id == id }) { tracks[index].contentFingerprint = hash }
+            if hash == fingerprint { return self.track(id) }
         }
+        return nil
     }
 
     private func importAudioFile(
@@ -578,7 +584,10 @@ final class LibraryStore: ObservableObject {
         source: String,
         saveAfter: Bool,
         duplicateBehavior: DuplicateBehavior
-    ) throws -> Track {
+    ) async throws -> Track {
+        await importGate.acquire()
+        defer { importGate.release() }
+        try Task.checkCancellation()
         guard isSupportedAudio(sourceURL) else {
             throw NSError(
                 domain: "UnSound.Library",
@@ -587,11 +596,11 @@ final class LibraryStore: ObservableObject {
             )
         }
 
-        let fingerprint = importFingerprint(for: sourceURL)
-        if let existing = existingTrack(for: fingerprint) {
+        let fingerprint = try await ImportFingerprintCache.shared.fingerprint(sourceURL)
+        if let existing = try await existingTrack(for: fingerprint, sourceURL: sourceURL) {
             switch duplicateBehavior {
             case .queue:
-                try stageDuplicate(
+                try await stageDuplicate(
                     sourceURL,
                     source: source,
                     fingerprint: fingerprint,
@@ -608,7 +617,7 @@ final class LibraryStore: ObservableObject {
         let sourceID = duplicateBehavior == .allow
             ? fingerprint + "|duplicate|" + UUID().uuidString
             : fingerprint
-        let track = try storeAudioCopy(
+        let track = try await storeAudioCopy(
             from: sourceURL,
             source: source,
             sourceID: sourceID,
@@ -623,25 +632,26 @@ final class LibraryStore: ObservableObject {
         source: String,
         sourceID: String,
         displayName: String
-    ) throws -> Track {
+    ) async throws -> Track {
         try fileManager.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
         let ext = sourceURL.pathExtension.isEmpty ? "m4a" : sourceURL.pathExtension.lowercased()
         let storedName = "\(UUID().uuidString).\(ext)"
         let destination = mediaDirectory.appendingPathComponent(storedName)
         if fileManager.fileExists(atPath: destination.path) { try fileManager.removeItem(at: destination) }
-        try fileManager.copyItem(at: sourceURL, to: destination)
+        try await ImportFingerprintCache.shared.copy(from: sourceURL, to: destination)
 
         let rawName = URL(fileURLWithPath: displayName).deletingPathExtension().lastPathComponent
         let pieces = rawName.components(separatedBy: " - ")
         let artist = pieces.count > 1 ? pieces.first! : "Unknown Artist"
         let title = pieces.count > 1 ? pieces.dropFirst().joined(separator: " - ") : rawName
-        let track = Track(
+        var track = Track(
             title: title,
             artist: artist,
             source: source,
             sourceID: sourceID,
             localFilename: storedName
         )
+        track.contentFingerprint = sourceID.components(separatedBy: "|duplicate|").first
         tracks.insert(track, at: 0)
         scheduleAutomaticArtwork(
             for: track,
@@ -682,7 +692,7 @@ final class LibraryStore: ObservableObject {
         source: String,
         fingerprint: String,
         existingTitle: String
-    ) throws {
+    ) async throws {
         try fileManager.createDirectory(at: duplicateStagingDirectory, withIntermediateDirectories: true)
 
         if duplicateImportQueue.contains(where: { $0.fingerprint == fingerprint && $0.displayName == sourceURL.lastPathComponent }) {
@@ -691,7 +701,7 @@ final class LibraryStore: ObservableObject {
 
         let ext = sourceURL.pathExtension.isEmpty ? "m4a" : sourceURL.pathExtension.lowercased()
         let stagedURL = duplicateStagingDirectory.appendingPathComponent("\(UUID().uuidString).\(ext)")
-        try fileManager.copyItem(at: sourceURL, to: stagedURL)
+        try await ImportFingerprintCache.shared.copy(from: sourceURL, to: stagedURL)
 
         duplicateImportQueue.append(
             DuplicateImportRequest(

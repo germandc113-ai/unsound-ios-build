@@ -55,6 +55,7 @@ struct RootView: View {
             // so keep it attached for bass/speed/effect persistence. Its network
             // tick returns immediately while not paired.
             sync.attach(audio: audio, library: library, player: player)
+            player.restoreSessionIfNeeded()
             cloud.attach(library: library, player: player, audio: audio)
             cloudLibrary.attach(library: library)
             duplicateAlertPresented = library.currentDuplicateImport != nil
@@ -76,8 +77,10 @@ struct RootView: View {
             }
 
             Button(AppLocalization.text("SAVE")) {
-                _ = library.acceptCurrentDuplicate()
-                presentNextDuplicateIfNeeded()
+                Task { @MainActor in
+                    _ = await library.acceptCurrentDuplicate()
+                    presentNextDuplicateIfNeeded()
+                }
             }
         } message: {
             if let duplicate = library.currentDuplicateImport {
