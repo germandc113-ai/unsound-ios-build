@@ -200,6 +200,7 @@ final class LibraryStore: ObservableObject {
             tracks[existingIndex].title = title
             tracks[existingIndex].artist = artist
             tracks[existingIndex].localFilename = storedName
+            tracks[existingIndex].contentFingerprint = nil
             tracks[existingIndex].artworkURL = artworkURL
             tracks[existingIndex].providerURL = providerURL
             let updated = tracks[existingIndex]
@@ -266,6 +267,7 @@ final class LibraryStore: ObservableObject {
             tracks[existingIndex].title = title
             tracks[existingIndex].artist = artist
             tracks[existingIndex].localFilename = storedName
+            tracks[existingIndex].contentFingerprint = nil
             tracks[existingIndex].artworkURL = artworkURL ?? tracks[existingIndex].artworkURL
             tracks[existingIndex].providerURL = providerURL ?? tracks[existingIndex].providerURL
             let updated = tracks[existingIndex]

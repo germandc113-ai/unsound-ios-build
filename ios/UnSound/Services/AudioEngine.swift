@@ -622,8 +622,8 @@ final class AudioEngine: ObservableObject {
             outputScale = 1.0 - (0.03 * x)
         }
 
-        let subTrim = AudioLevelPolicy.clampedTrim(subBassTrim)
-        let punchTrim = AudioLevelPolicy.clampedTrim(kickTrim)
+        let subTrim = AudioLevelPolicy.scaledTrim(subBassTrim, bassDB: bassDB)
+        let punchTrim = AudioLevelPolicy.scaledTrim(kickTrim, bassDB: bassDB)
         eq.bands[0].gain = Float(subGain + subTrim)
         eq.bands[1].gain = Float(slamGain)
         eq.bands[2].gain = Float(punchGain + punchTrim)

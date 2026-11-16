@@ -63,3 +63,9 @@ assert(decodedLegacy.id == legacyTrack.id && decodedLegacy.contentFingerprint ==
 PlaybackSessionStore.save(old)
 assert(PlaybackSessionStore.load()?.position == 37.5)
 print("Old library compatibility and saved playback checkpoint passed")
+
+assert(AudioLevelPolicy.scaledTrim(6, bassDB: 0) == 0)
+assert(AudioLevelPolicy.scaledTrim(-6, bassDB: 0) == 0)
+assert(AudioLevelPolicy.scaledTrim(6, bassDB: 15) == 3)
+assert(AudioLevelPolicy.scaledTrim(6, bassDB: 30) == 6)
+print("Master bass control scales all detail boosts and switches them off at zero")

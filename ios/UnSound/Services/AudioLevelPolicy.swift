@@ -8,6 +8,11 @@ enum AudioLevelPolicy {
         return min(0, max(-18, -18 - 20 * log10(rms)))
     }
 
+    static func scaledTrim(_ value: Double, bassDB: Double) -> Double {
+        let amount = bassDB.isFinite ? min(30, max(0, bassDB)) : 0
+        return clampedTrim(value) * amount / 30
+    }
+
     static func clampedTrim(_ value: Double) -> Double {
         value.isFinite ? min(6, max(-6, value)) : 0
     }
