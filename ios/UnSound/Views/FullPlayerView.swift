@@ -38,6 +38,7 @@ struct FullPlayerView: View {
                         metadata(track)
                         progress
                         transport
+                        PlaybackQueueButton(player: player, library: library)
                         bassSection(track)
                         lyricsCard
                         BrandFooter().padding(.top, 2)

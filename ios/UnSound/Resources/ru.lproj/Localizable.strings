@@ -276,3 +276,5 @@
 "That result has no synced timing." = "У этого результата нет синхронизированного тайминга.";
 "Type it directly, e.g. 18.237 sec or 18237 ms" = "Введите напрямую, например 18,237 сек. или 18237 мс";
 "Use the same endpoint and sync code on both iPhones. Your libraries, likes and playlists stay separate. SYNC NOW sends only the current song + playback position." = "Используйте одинаковый адрес и код синхронизации на обоих iPhone. Медиатеки, лайки и плейлисты остаются раздельными. СИНХРОНИЗИРОВАТЬ отправляет только текущий трек и позицию.";
+
+"Queue" = "Очередь";

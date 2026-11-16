@@ -276,3 +276,5 @@
 "That result has no synced timing." = "Dieses Ergebnis hat kein synchronisiertes Timing.";
 "Type it directly, e.g. 18.237 sec or 18237 ms" = "Direkt eingeben, z. B. 18,237 Sek. oder 18237 ms";
 "Use the same endpoint and sync code on both iPhones. Your libraries, likes and playlists stay separate. SYNC NOW sends only the current song + playback position." = "Verwende auf beiden iPhones denselben Endpunkt und Sync-Code. Mediatheken, Likes und Playlists bleiben getrennt. JETZT SYNCHRONISIEREN sendet nur den aktuellen Song und die Wiedergabeposition.";
+
+"Queue" = "Warteschlange";
