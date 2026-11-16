@@ -22,7 +22,9 @@ final class PlayerCoordinator: ObservableObject {
     private var previewPlayer: AVAudioPlayer?
     private var previewTask: Task<Void, Never>?
     private var resumeMainAfterPreview = false
-    private var randomAutoplayActive = false
+    private var repeatQueue: [UUID] = []
+    private var playbackHistory: [UUID] = []
+    private var lyricsTask: Task<Void, Never>?
     private let lyricsAutoSyncKeyPrefix = "unsound.lyricsAutoSynced."
 
     init(audio: AudioEngine, library: LibraryStore) {
@@ -43,12 +45,12 @@ final class PlayerCoordinator: ObservableObject {
         guard let url = library.localURL(for: track) else { return }
 
         if let newQueue {
-            randomAutoplayActive = shouldUseRandomAutoplay(for: newQueue)
-            if randomAutoplayActive {
-                queue = [track.id]
-            } else {
-                queue = newQueue.map(\.id)
-            }
+            repeatQueue = newQueue.map(\.id)
+            playbackHistory = []
+            queue = repeatQueue
+        }
+        if audio.repeatMode == .off {
+            refreshLibraryQueue(startingWith: track.id)
         } else if queue.isEmpty {
             queue = [track.id]
         }
@@ -58,7 +60,13 @@ final class PlayerCoordinator: ObservableObject {
         library.recordPlay(track)
         ReplayHistory.recordPlay(track: track)
         if let p = selectedPreset(for: track) { audio.apply(p) }
-        Task { await loadLyrics(track) }
+        lyricsTask?.cancel()
+        lyricsTask = Task { [weak self] in
+            // Rapid skips should not launch overlapping network/OCR work.
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            await self?.loadLyrics(track)
+        }
     }
 
     func preview(_ track: Track, seconds: Double = 12) {
@@ -108,71 +116,62 @@ final class PlayerCoordinator: ObservableObject {
         if resumeMain && shouldResume { audio.play() }
     }
 
+    /// Preserve the existing order, append new downloads, and rotate to the
+    /// selected song. Every playable library song occurs exactly once.
+    private func refreshLibraryQueue(startingWith id: UUID) {
+        let playable = library.tracks.filter { library.localURL(for: $0) != nil }.map(\.id)
+        queue = PlaybackQueue.libraryOrder(existing: queue, playable: playable, current: id)
+    }
+
     func next() {
         guard let current = audio.currentTrack else { return }
-
-        if randomAutoplayActive {
-            if let idx = queue.firstIndex(of: current.id), idx + 1 < queue.count,
-               let forward = library.track(queue[idx + 1]) {
-                play(forward)
-                return
-            }
-
-            let recentIDs = Set(queue.suffix(6))
-            let playable = library.tracks.filter {
-                $0.id != current.id &&
-                library.localURL(for: $0) != nil &&
-                !library.isSuggestionHidden($0.id)
-            }
-            let fresh = playable.filter { !recentIDs.contains($0.id) }
-            let candidates = fresh.isEmpty ? playable : fresh
-
-            guard let randomTrack = candidates.randomElement() else {
-                audio.pause()
-                return
-            }
-
-            queue.append(randomTrack.id)
-            if queue.count > 40 {
-                queue.removeFirst(queue.count - 40)
-            }
-            play(randomTrack)
+        if audio.repeatMode == .track {
+            audio.seek(to: 0)
+            audio.play()
             return
         }
-
-        guard let idx = queue.firstIndex(of: current.id), !queue.isEmpty else { return }
-        let nextIdx = (idx + 1) % queue.count
-        if audio.repeatMode == .off && nextIdx == 0 {
-            audio.pause()
+        if audio.repeatMode == .off {
+            refreshLibraryQueue(startingWith: current.id)
+            guard !queue.isEmpty else { audio.pause(); return }
+            queue = PlaybackQueue.advancing(queue, past: current.id)
+            playbackHistory.append(current.id)
+            if playbackHistory.count > 100 { playbackHistory.removeFirst() }
+            if let nextID = queue.first, let track = library.track(nextID) { play(track) }
             return
         }
-        if let t = library.track(queue[nextIdx]) { play(t) }
+        let playable = repeatQueue.compactMap(library.track).filter { library.localURL(for: $0) != nil }
+        queue = playable.map(\.id)
+        guard !queue.isEmpty else { audio.pause(); return }
+        let index = queue.firstIndex(of: current.id) ?? (queue.count - 1)
+        if let track = library.track(queue[(index + 1) % queue.count]) { play(track) }
     }
 
     func previous() {
         guard let current = audio.currentTrack else { return }
-        if audio.currentTime > 4 { audio.seek(to: 0); return }
-
-        if randomAutoplayActive {
-            guard let idx = queue.firstIndex(of: current.id), idx > 0,
-                  let previousTrack = library.track(queue[idx - 1]) else {
-                audio.seek(to: 0)
-                return
+        if audio.currentTime > 4 || audio.repeatMode == .track { audio.seek(to: 0); return }
+        if audio.repeatMode == .off {
+            while let id = playbackHistory.popLast() {
+                if let track = library.track(id), library.localURL(for: track) != nil {
+                    play(track)
+                    return
+                }
             }
-            play(previousTrack)
+            audio.seek(to: 0)
             return
         }
-
-        guard let idx = queue.firstIndex(of: current.id), !queue.isEmpty else { return }
-        let previousIndex = idx == 0 ? queue.count - 1 : idx - 1
-        if let t = library.track(queue[previousIndex]) { play(t) }
+        guard let index = queue.firstIndex(of: current.id), !queue.isEmpty else { return }
+        if let track = library.track(queue[(index + queue.count - 1) % queue.count]) { play(track) }
     }
 
     func cycleRepeatMode() {
         switch audio.repeatMode {
-        case .off: audio.repeatMode = .playlist
+        case .off:
+            audio.repeatMode = .playlist
+            queue = repeatQueue
         case .playlist: audio.repeatMode = .track
-        case .track: audio.repeatMode = .off
+        case .track:
+            audio.repeatMode = .off
+            if let id = audio.currentTrack?.id { refreshLibraryQueue(startingWith: id) }
         }
     }
 
@@ -231,26 +230,11 @@ final class PlayerCoordinator: ObservableObject {
         return track.presets.first
     }
 
-    private func shouldUseRandomAutoplay(for tracks: [Track]) -> Bool {
-        let ids = tracks.map(\.id)
-        guard !ids.isEmpty else { return false }
-
-        if ids == library.likedTracks.map(\.id) {
-            return false
-        }
-
-        if library.playlists.contains(where: { $0.trackIDs == ids }) {
-            return false
-        }
-
-        return true
-    }
-
     func loadLyrics(_ track: Track) async {
         lyricsSyncStatus = nil
         do {
             let base = try await lookupBaseLyrics(for: track)
-            guard audio.currentTrack?.id == track.id else { return }
+            guard !Task.isCancelled, audio.currentTrack?.id == track.id else { return }
 
             baseLyrics = base
             baseLyricsTrackID = track.id
@@ -270,7 +254,7 @@ final class PlayerCoordinator: ObservableObject {
                 await autoSyncLyrics(force: false)
             }
         } catch {
-            guard audio.currentTrack?.id == track.id else { return }
+            guard !Task.isCancelled, audio.currentTrack?.id == track.id else { return }
             baseLyrics = []
             baseLyricsTrackID = track.id
             lyrics = []
@@ -413,6 +397,7 @@ final class PlayerCoordinator: ObservableObject {
     /// random cover text cannot silently attach unrelated lyrics.
     private func lookupBaseLyrics(for track: Track) async throws -> [LyricLine] {
         let normal = try await lyricsService.fetchBaseLyrics(title: track.title, artist: track.artist)
+        try Task.checkCancellation()
         if !normal.isEmpty { return normal }
 
         let words: [String]

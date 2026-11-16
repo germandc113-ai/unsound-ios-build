@@ -23,6 +23,7 @@ private final class SpectrumAnalyzerCore {
     private var minimumInterval: TimeInterval = 1.0 / 12.0
     private var lastAcceptedTime: TimeInterval = 0
     private var analysisEnabled = false
+    private var analysisInFlight = false
 
     init() {
         setup = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(fftSize), .FORWARD)
@@ -47,23 +48,32 @@ private final class SpectrumAnalyzerCore {
         stateLock.lock()
         defer { stateLock.unlock() }
 
-        guard analysisEnabled else { return false }
+        guard analysisEnabled, !analysisInFlight else { return false }
         guard lastAcceptedTime == 0 || now - lastAcceptedTime >= minimumInterval else { return false }
         lastAcceptedTime = now
+        analysisInFlight = true
         return true
+    }
+
+    private func finishAnalysis() {
+        stateLock.lock()
+        analysisInFlight = false
+        stateLock.unlock()
     }
 
     func process(_ buffer: AVAudioPCMBuffer, completion: @escaping (SpectrumFrame) -> Void) {
         guard shouldAnalyze() else { return }
-        guard let channel = buffer.floatChannelData?[0] else { return }
+        guard let channel = buffer.floatChannelData?[0] else { finishAnalysis(); return }
         let count = min(Int(buffer.frameLength), fftSize)
-        guard count > 64 else { return }
+        guard count > 64 else { finishAnalysis(); return }
 
         let samples = Array(UnsafeBufferPointer(start: channel, count: count))
         let sampleRate = buffer.format.sampleRate
 
         queue.async { [weak self] in
-            guard let self, let setup = self.setup else { return }
+            guard let self else { return }
+            defer { self.finishAnalysis() }
+            guard let setup = self.setup else { return }
 
             var inputReal = [Float](repeating: 0, count: self.fftSize)
             var inputImag = [Float](repeating: 0, count: self.fftSize)
@@ -444,18 +454,19 @@ final class AudioEngine: ObservableObject {
         case .crusherANC2:
             // Crusher already adds physical low-end via Sensory Bass. Boosting
             // the deepest bands too aggressively mainly drives its DSP limiter,
-            // so emphasize 50–90 Hz and keep enough preamp headroom.
-            eq.bands[0].frequency = 46
-            eq.bands[1].frequency = 64
-            eq.bands[1].bandwidth = 0.62
-            eq.bands[2].frequency = 92
+            // so emphasize 40–95 Hz with headroom for overlapping filter peaks.
+            // The app cannot control the hardware Sensory Bass slider.
+            eq.bands[0].frequency = 42
+            eq.bands[1].frequency = 58
+            eq.bands[1].bandwidth = 0.80
+            eq.bands[2].frequency = 95
             eq.bands[2].bandwidth = 0.82
-            subGain = 8.0 * shaped
-            slamGain = 10.5 * shaped
-            punchGain = 6.0 * shaped
+            subGain = 10.0 * shaped
+            slamGain = 11.5 * shaped
+            punchGain = 5.0 * shaped
             midCut = -6.5 * pow(x, 1.10)
             highCut = -2.8 * pow(x, 1.06)
-            headroom = -10.0 * shaped
+            headroom = -16.0 * shaped
             outputScale = 1.0 - (0.06 * x)
 
         case .phone:
@@ -491,7 +502,7 @@ final class AudioEngine: ObservableObject {
         guard remaining > 0 else { handleFinished(); return }
         let id = UUID()
         scheduleID = id
-        player.scheduleSegment(f, startingFrame: frame, frameCount: AVAudioFrameCount(remaining), at: nil) { [weak self] in
+        player.scheduleSegment(f, startingFrame: frame, frameCount: AVAudioFrameCount(remaining), at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, self.scheduleID == id else { return }
                 self.handleFinished()

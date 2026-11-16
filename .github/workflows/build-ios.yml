@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - fix/build-43-playback
     paths:
       - "ios/**"
       - ".github/workflows/build-ios.yml"
@@ -15,6 +16,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Test playback queue
+        run: |
+          cat ios/UnSound/Services/PlaybackQueue.swift tests/PlaybackQueueTests.swift > "$RUNNER_TEMP/queue-tests.swift"
+          swift "$RUNNER_TEMP/queue-tests.swift"
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -81,3 +87,4 @@ jobs:
           name: UnSound-iOS-unsigned
           path: ios/UnSound.ipa
           if-no-files-found: error
+          retention-days: 3

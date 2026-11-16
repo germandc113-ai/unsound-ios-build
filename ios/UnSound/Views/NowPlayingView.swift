@@ -295,9 +295,11 @@ struct QuickHomeSuggestions: View {
     @State private var query = ""
 
     private var filtered: [Track] {
-        let visible = library.tracks.filter { !library.isSuggestionHidden($0.id) }
+        let visible = player.queue.isEmpty
+            ? library.tracks.filter { library.localURL(for: $0) != nil }
+            : player.queue.compactMap(library.track)
         return query.isEmpty
-            ? Array(visible.prefix(8))
+            ? visible
             : visible.filter {
                 $0.title.localizedCaseInsensitiveContains(query) ||
                 $0.artist.localizedCaseInsensitiveContains(query)
@@ -305,7 +307,7 @@ struct QuickHomeSuggestions: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        LazyVStack(alignment: .leading, spacing: 14) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(USTheme.secondary)
                 TextField("Quick search", text: $query)
@@ -315,7 +317,7 @@ struct QuickHomeSuggestions: View {
             .usGlass(RoundedRectangle(cornerRadius: 17, style: .continuous), interactive: true)
 
             HStack {
-                Text("Similar / recent").font(.headline)
+                Text("Queue").font(.headline)
                 Spacer()
                 Text("− hides")
                     .font(.caption2.bold())
