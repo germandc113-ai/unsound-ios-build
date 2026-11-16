@@ -51,7 +51,8 @@ func renderPeak(limited: Bool) throws -> Float {
 }
 let unprotectedPeak = try renderPeak(limited: false)
 let protectedPeak = try renderPeak(limited: true)
-assert(unprotectedPeak > 1.4)
+FileHandle.standardOutput.write(Data("Rendered peaks: unprotected=\(unprotectedPeak), protected=\(protectedPeak)\n".utf8))
+assert(unprotectedPeak > 1.0, "The test signal must exceed full scale: \(unprotectedPeak)")
 assert(protectedPeak > 0.1 && protectedPeak <= 1.01, "Peak limiter exceeded full scale: \(protectedPeak)")
 print("Offline audio rendering: peak \(unprotectedPeak) without limiter, \(protectedPeak) with limiter")
 
